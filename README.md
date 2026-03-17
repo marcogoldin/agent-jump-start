@@ -36,7 +36,23 @@ Agent Jump Start solves this with one canonical YAML/JSON spec that feeds a zero
 
 ## Quick Start
 
-### 1. Copy into your project
+### Option A: One-command init (recommended)
+
+```bash
+npx agent-jump-start init --profile specs/profiles/react-vite-mui.profile.yaml --target .
+```
+
+This single command copies the framework, bootstraps the canonical spec with your chosen profile, validates the spec, and renders all instruction files. You're ready to customize.
+
+Run without `--profile` to see available profiles:
+
+```bash
+npx agent-jump-start init --target .
+```
+
+### Option B: Step-by-step setup
+
+#### 1. Copy into your project
 
 Copy the `agent-jump-start` folder into your target repository:
 
@@ -50,9 +66,9 @@ Or clone directly:
 git clone https://github.com/YOUR_USERNAME/agent-jump-start.git docs/agent-jump-start
 ```
 
-### 2. Choose a starting profile
+#### 2. Choose a starting profile
 
-Available example profiles:
+Available example profiles (list with `node scripts/agent-jump-start.mjs list-profiles`):
 
 | Profile | Stack |
 |---|---|
@@ -62,7 +78,7 @@ Available example profiles:
 
 If neither fits, duplicate one and adjust it, or skip the profile and customize the base spec directly.
 
-### 3. Bootstrap the canonical spec
+#### 3. Bootstrap the canonical spec
 
 ```bash
 node docs/agent-jump-start/scripts/agent-jump-start.mjs bootstrap \
@@ -73,7 +89,7 @@ node docs/agent-jump-start/scripts/agent-jump-start.mjs bootstrap \
 
 This creates `docs/agent-jump-start/canonical-spec.yaml` — your **single source of truth**.
 
-### 4. Customize the canonical spec
+#### 4. Customize the canonical spec
 
 Edit `canonical-spec.yaml` with your real:
 
@@ -83,27 +99,29 @@ Edit `canonical-spec.yaml` with your real:
 - Validation commands (lint, test, build)
 - Skills and rule sets
 
-### 5. Render all instruction files
+#### 5. Render all instruction files
 
 ```bash
 node docs/agent-jump-start/scripts/agent-jump-start.mjs render \
   --spec docs/agent-jump-start/canonical-spec.yaml \
-  --target .
+  --target . --clean
 ```
+
+The `--clean` flag removes stale files from previous renders (e.g., skills you removed from the spec).
 
 This generates synchronized instruction files for all 9 supported agents:
 
 ```
 AGENTS.md                                  # GitHub Agents
 CLAUDE.md                                  # Claude Code
-CONVENTIONS.md                             # Aider
-.github/copilot-instructions.md            # GitHub Copilot
+CONVENTIONS.md                             # Aider (with inline skill summaries)
+.github/copilot-instructions.md            # GitHub Copilot (with inline skill summaries)
 .cursor/rules/agent-instructions.mdc       # Cursor
 .cursor/rules/<skill-slug>.mdc             # Cursor (per skill)
-.windsurfrules                             # Windsurf
-.clinerules                                # Cline
-.roo/rules/agent-instructions.md           # Roo Code
-.continue/rules/agent-instructions.md      # Continue.dev
+.windsurfrules                             # Windsurf (with inline skill summaries)
+.clinerules                                # Cline (with inline skill summaries)
+.roo/rules/agent-instructions.md           # Roo Code (with inline skill summaries)
+.continue/rules/agent-instructions.md      # Continue.dev (with inline skill summaries)
 .agents/skills/<slug>/SKILL.md             # GitHub Agents (skill descriptor)
 .agents/skills/<slug>/AGENTS.md            # GitHub Agents (skill guide)
 .claude/skills/<slug>/AGENTS.md            # Claude Code (skill guide)
@@ -111,7 +129,9 @@ docs/agent-review-checklist.md             # Review checklist
 docs/agent-jump-start/generated-manifest.json
 ```
 
-### 6. Verify sync
+> **Skill propagation:** Agents with native skill folder support (Claude Code, GitHub Agents, Cursor) get full skill files. All other agents receive inline skill summaries directly in their workspace instruction file, so no agent misses skill guidance.
+
+#### 6. Verify sync
 
 ```bash
 node docs/agent-jump-start/scripts/agent-jump-start.mjs check \
@@ -253,8 +273,11 @@ This means whichever assistant you use — Claude, Copilot, Cursor, or any other
 | Arrays replaced (not merged) in profiles | Predictable overlay behavior; no surprise rule interleaving |
 | Generated notice in every file | Prevents accidental hand-edits that drift from the spec |
 | Cursor MDC format with frontmatter | Native Cursor rules support with `alwaysApply` and `description` |
-| Manifest with timestamps | Enables stale file detection and CI enforcement |
+| Manifest with file list | Enables stale file detection, cleanup, and CI enforcement |
 | Skills as first-class objects | Reusable across projects; composable via profiles |
+| Inline skill summaries for non-native agents | Every agent gets skill guidance, even without skill folder support |
+| Spec validation on every command | Catches errors early with readable, numbered diagnostics |
+| `--clean` flag on render | Removes stale files from previous renders when spec evolves |
 
 ## Update Workflow
 
@@ -281,8 +304,14 @@ node scripts/agent-jump-start.mjs --help
 # Show version
 node scripts/agent-jump-start.mjs --version
 
+# One-step init (copies framework, bootstraps, validates, renders)
+npx agent-jump-start init --profile specs/profiles/react-vite-mui.profile.yaml --target .
+
 # List supported agents
 node scripts/agent-jump-start.mjs list-agents
+
+# List available profiles
+node scripts/agent-jump-start.mjs list-profiles
 
 # Bootstrap from base + profile
 node scripts/agent-jump-start.mjs bootstrap \
@@ -290,13 +319,17 @@ node scripts/agent-jump-start.mjs bootstrap \
   --profile specs/profiles/react-vite-mui.profile.yaml \
   --output canonical-spec.yaml
 
-# Render all instruction files
+# Render all instruction files (--clean removes stale files)
 node scripts/agent-jump-start.mjs render \
-  --spec canonical-spec.yaml --target .
+  --spec canonical-spec.yaml --target . --clean
 
 # Verify sync (CI-friendly, exits 1 on drift)
 node scripts/agent-jump-start.mjs check \
   --spec canonical-spec.yaml --target .
+
+# Validate spec structure without rendering
+node scripts/agent-jump-start.mjs validate \
+  --spec canonical-spec.yaml
 
 # Import an external skill into the canonical spec
 node scripts/agent-jump-start.mjs import-skill \
