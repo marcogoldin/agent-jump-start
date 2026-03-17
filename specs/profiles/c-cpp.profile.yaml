@@ -1,0 +1,311 @@
+{
+  "project": {
+    "name": "C/C++ Repository",
+    "summary": "C and C++ project with synchronized AI agent instructions.",
+    "components": [
+      "core: C/C++ application or library",
+      "build: CMake or Makefile-based build system",
+      "tests: unit and integration tests"
+    ]
+  },
+  "workspaceInstructions": {
+    "packageManagerRule": "Use the build system already adopted by the repository (CMake, Meson, Bazel, Make). Do not switch build systems without explicit agreement.",
+    "runtimeRule": "Target the C and C++ standard versions declared in the project configuration. Do not use compiler extensions or newer standard features unless the project explicitly allows them.",
+    "sections": [
+      {
+        "title": "General rules",
+        "rules": [
+          "Prefer small, reviewable changes that preserve current behavior unless the task explicitly changes a feature or contract.",
+          "Keep code compatible with the project's declared C/C++ standard and supported compilers (GCC, Clang, MSVC as applicable).",
+          "Preserve ABI stability, public header contracts, and backwards compatibility unless a breaking change is intentional.",
+          "Avoid undefined behavior, implementation-defined behavior, and platform-specific assumptions without explicit guards.",
+          "Update build configuration and documentation whenever dependencies, compiler flags, or runtime requirements change."
+        ]
+      },
+      {
+        "title": "C/C++ rules",
+        "rules": [
+          "Prefer RAII, smart pointers, and value semantics over manual memory management in C++ code.",
+          "Use const correctness consistently across function signatures, member functions, and variables.",
+          "Prefer standard library facilities over hand-rolled equivalents unless there is a measured performance reason.",
+          "Keep header files minimal: use forward declarations, avoid including unnecessary headers, and prefer the pimpl idiom for complex implementation details.",
+          "Use namespaces (C++) or consistent prefixes (C) to avoid symbol collisions."
+        ]
+      },
+      {
+        "title": "Safety rules",
+        "rules": [
+          "Never use raw owning pointers in C++ when a smart pointer or container is appropriate.",
+          "Bounds-check array and buffer access. Prefer std::span, std::array, or range-based iteration over raw pointer arithmetic.",
+          "Sanitize all external input before processing. Never trust data from files, network, or user input without validation.",
+          "Enable and fix all warnings from -Wall -Wextra -Wpedantic (GCC/Clang) or /W4 (MSVC). Treat warnings as errors in CI.",
+          "Run static analysis (clang-tidy, cppcheck) and sanitizers (ASan, UBSan, TSan) as part of the validation pipeline."
+        ]
+      },
+      {
+        "title": "Build and dependency rules",
+        "rules": [
+          "Pin dependency versions and use reproducible builds. Document how to fetch or install third-party libraries.",
+          "Keep build configuration (CMakeLists.txt, Makefile, meson.build) clean, well-commented, and modular.",
+          "Support both Debug and Release build types with appropriate optimization and debug flags.",
+          "Use pkg-config, find_package, or FetchContent for dependency resolution instead of hardcoded paths."
+        ]
+      },
+      {
+        "title": "Testing rules",
+        "rules": [
+          "Use the project's testing framework (Google Test, Catch2, CTest, or plain assert-based tests).",
+          "Test edge cases, boundary conditions, and error paths — not just the happy path.",
+          "Use sanitizers (AddressSanitizer, UndefinedBehaviorSanitizer) in test builds.",
+          "Keep test fixtures minimal and deterministic. Avoid test-order dependencies."
+        ]
+      }
+    ],
+    "validation": [
+      "Run the project's build command (cmake --build, make, or equivalent).",
+      "Run the test suite (ctest, make test, or the project's test runner).",
+      "Run static analysis when available (clang-tidy, cppcheck).",
+      "Compile with sanitizers enabled for CI (ASan, UBSan at minimum)."
+    ]
+  },
+  "reviewChecklist": {
+    "intro": "Checklist for verifying whether a C/C++ proposal follows the repository rules instead of generic textbook advice.",
+    "failureThreshold": 2,
+    "items": [
+      {
+        "title": "Reflects the real C/C++ standard, compiler, and build system constraints.",
+        "details": [
+          "The answer should use the declared language standard, build system, and compiler flags of the repository."
+        ]
+      },
+      {
+        "title": "Avoids undefined behavior and memory safety issues.",
+        "details": [
+          "No use-after-free, buffer overflows, uninitialized reads, data races, or signed integer overflow."
+        ]
+      },
+      {
+        "title": "Preserves ABI, header contracts, and public API stability.",
+        "details": [
+          "Struct layouts, exported symbols, header includes, and function signatures should not drift unintentionally."
+        ]
+      },
+      {
+        "title": "Uses RAII, const correctness, and modern idioms where applicable.",
+        "details": [
+          "C++ code should prefer smart pointers, value semantics, and standard algorithms over manual resource management."
+        ]
+      },
+      {
+        "title": "Includes or updates tests and static analysis.",
+        "details": [
+          "Changes affecting memory, concurrency, parsing, or public API should add or update tests with sanitizer coverage."
+        ]
+      }
+    ],
+    "quickSignals": [
+      "RAII and smart pointers instead of manual new/delete.",
+      "Const-correct function signatures.",
+      "Sanitizer-clean CI builds.",
+      "Minimal header includes with forward declarations."
+    ],
+    "redFlags": [
+      "Raw owning pointers without clear lifetime documentation.",
+      "Suppressed warnings or disabled sanitizers without justification.",
+      "Platform-specific code without #ifdef guards or abstraction layers.",
+      "Hardcoded paths, magic numbers, or implicit type conversions."
+    ]
+  },
+  "skills": [
+    {
+      "slug": "cpp-memory-safety",
+      "name": "cpp-memory-safety",
+      "title": "C++ Memory Safety and Resource Management",
+      "description": "Rules for writing memory-safe, leak-free C++ code using modern idioms.",
+      "version": "1.0.0",
+      "author": "Agent Jump Start",
+      "appliesWhen": [
+        "Writing or reviewing C++ code that allocates or manages resources",
+        "Refactoring legacy code that uses manual memory management",
+        "Designing ownership and lifetime contracts for APIs"
+      ],
+      "categories": [
+        {
+          "priority": 1,
+          "name": "Ownership",
+          "impact": "HIGH",
+          "prefix": "own-"
+        },
+        {
+          "priority": 2,
+          "name": "Lifetime Safety",
+          "impact": "HIGH",
+          "prefix": "life-"
+        },
+        {
+          "priority": 3,
+          "name": "Concurrency Safety",
+          "impact": "MEDIUM",
+          "prefix": "conc-"
+        }
+      ],
+      "rules": [
+        {
+          "id": "own-smart-pointers",
+          "category": "Ownership",
+          "title": "Use smart pointers for heap ownership",
+          "impact": "HIGH",
+          "summary": "Default to std::unique_ptr for exclusive ownership and std::shared_ptr only when shared ownership is genuinely required.",
+          "guidance": [
+            "Use std::make_unique and std::make_shared to avoid allocation-exception leaks.",
+            "Pass raw pointers or references for non-owning access. Never transfer ownership via raw pointer.",
+            "Prefer value semantics and stack allocation when object lifetime is scoped."
+          ]
+        },
+        {
+          "id": "own-raii",
+          "category": "Ownership",
+          "title": "Use RAII for all resource types",
+          "impact": "HIGH",
+          "summary": "Wrap file handles, sockets, locks, GPU resources, and allocations in RAII wrappers so cleanup is deterministic.",
+          "guidance": [
+            "Implement or use existing RAII wrappers instead of try/catch cleanup blocks.",
+            "Follow the Rule of Five (or Rule of Zero) for classes that manage resources.",
+            "Ensure move constructors and move assignment operators leave the source in a valid state."
+          ]
+        },
+        {
+          "id": "life-dangling-refs",
+          "category": "Lifetime Safety",
+          "title": "Prevent dangling references and pointers",
+          "impact": "HIGH",
+          "summary": "Never return references or pointers to local variables, temporary objects, or invalidated container elements.",
+          "guidance": [
+            "Be aware of iterator and reference invalidation rules for std::vector, std::string, and other containers.",
+            "Use std::string_view and std::span carefully — they do not own the underlying data.",
+            "Prefer returning by value; rely on copy elision and move semantics."
+          ]
+        },
+        {
+          "id": "life-bounds-checking",
+          "category": "Lifetime Safety",
+          "title": "Bounds-check buffer and array access",
+          "impact": "HIGH",
+          "summary": "Use std::array, std::vector, std::span, or range-based for loops instead of raw pointer arithmetic.",
+          "guidance": [
+            "Use .at() in debug builds for bounds-checked access.",
+            "Validate all sizes and indices derived from external input before use.",
+            "Enable AddressSanitizer in test and CI builds to catch out-of-bounds access."
+          ]
+        },
+        {
+          "id": "conc-data-races",
+          "category": "Concurrency Safety",
+          "title": "Prevent data races in concurrent code",
+          "impact": "MEDIUM",
+          "summary": "Protect shared mutable state with mutexes, atomics, or lock-free structures. Never access shared data without synchronization.",
+          "guidance": [
+            "Use std::mutex with std::lock_guard or std::scoped_lock for critical sections.",
+            "Prefer std::atomic for simple shared counters and flags.",
+            "Run ThreadSanitizer in CI to catch races that are hard to reproduce manually."
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "c-cpp-build-practices",
+      "name": "c-cpp-build-practices",
+      "title": "C/C++ Build and Toolchain Practices",
+      "description": "Rules for maintainable, portable, and reproducible C/C++ build configurations.",
+      "version": "1.0.0",
+      "author": "Agent Jump Start",
+      "appliesWhen": [
+        "Configuring or modifying CMake, Meson, Bazel, or Makefile build systems",
+        "Adding dependencies, compiler flags, or platform-specific code",
+        "Setting up CI pipelines for C/C++ projects"
+      ],
+      "categories": [
+        {
+          "priority": 1,
+          "name": "Build Configuration",
+          "impact": "HIGH",
+          "prefix": "build-"
+        },
+        {
+          "priority": 2,
+          "name": "Portability",
+          "impact": "HIGH",
+          "prefix": "port-"
+        },
+        {
+          "priority": 3,
+          "name": "Diagnostics",
+          "impact": "MEDIUM",
+          "prefix": "diag-"
+        }
+      ],
+      "rules": [
+        {
+          "id": "build-modern-cmake",
+          "category": "Build Configuration",
+          "title": "Use modern CMake target-based configuration",
+          "impact": "HIGH",
+          "summary": "Prefer target_link_libraries, target_compile_options, and target_include_directories over global cmake variables.",
+          "guidance": [
+            "Set cmake_minimum_required to the lowest version that supports all features used.",
+            "Use PRIVATE, PUBLIC, and INTERFACE keywords to control dependency propagation.",
+            "Use FetchContent or find_package for external dependencies instead of manual submodule management."
+          ]
+        },
+        {
+          "id": "build-reproducible",
+          "category": "Build Configuration",
+          "title": "Keep builds reproducible",
+          "impact": "HIGH",
+          "summary": "Pin dependency versions, avoid __DATE__/__TIME__ macros, and document the full toolchain required.",
+          "guidance": [
+            "Use lock files, pinned tags, or exact versions for all fetched dependencies.",
+            "Document minimum compiler versions and required system libraries in README or BUILDING.md.",
+            "Support out-of-source builds and avoid modifying source files during the build."
+          ]
+        },
+        {
+          "id": "port-cross-platform",
+          "category": "Portability",
+          "title": "Guard platform-specific code",
+          "impact": "HIGH",
+          "summary": "Use preprocessor guards, CMake platform checks, or abstraction layers for platform-specific functionality.",
+          "guidance": [
+            "Prefer portable standard library facilities over OS-specific APIs when possible.",
+            "Test on all supported platforms in CI (Linux, macOS, Windows as applicable).",
+            "Isolate platform-specific code into dedicated files rather than scattering #ifdefs."
+          ]
+        },
+        {
+          "id": "diag-warnings",
+          "category": "Diagnostics",
+          "title": "Enable comprehensive compiler warnings",
+          "impact": "MEDIUM",
+          "summary": "Compile with -Wall -Wextra -Wpedantic (GCC/Clang) or /W4 (MSVC) and treat warnings as errors in CI.",
+          "guidance": [
+            "Fix warnings rather than suppressing them. Document any intentional suppressions.",
+            "Enable -Werror in CI builds. Optionally keep it off for local development to avoid blocking iteration.",
+            "Use clang-tidy with a project-specific .clang-tidy configuration for deeper static analysis."
+          ]
+        },
+        {
+          "id": "diag-sanitizers",
+          "category": "Diagnostics",
+          "title": "Run sanitizers in CI",
+          "impact": "MEDIUM",
+          "summary": "Enable AddressSanitizer, UndefinedBehaviorSanitizer, and ThreadSanitizer in CI test builds.",
+          "guidance": [
+            "Create dedicated CMake presets or build types for sanitizer builds.",
+            "Run the full test suite under each sanitizer. Do not combine ASan and TSan in the same build.",
+            "Fix all sanitizer findings before merging. Zero-tolerance policy for UB and memory errors."
+          ]
+        }
+      ]
+    }
+  ]
+}
