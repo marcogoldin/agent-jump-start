@@ -35,9 +35,10 @@ function usage() {
   console.log(`Agent Jump Start v${TOOL_VERSION}
 
 Commands:
-  bootstrap --base <path> [--profile <path>] [--output <path>]
-  render    --spec <path> [--target <path>]
-  check     --spec <path> [--target <path>]
+  bootstrap    --base <path> [--profile <path>] [--output <path>]
+  render       --spec <path> [--target <path>]
+  check        --spec <path> [--target <path>]
+  import-skill --spec <path> --skill <path> [--replace]
   list-agents
 
 Options:
@@ -55,6 +56,10 @@ Examples:
 
   node scripts/agent-jump-start.mjs check \\
     --spec canonical-spec.yaml --target .
+
+  node scripts/agent-jump-start.mjs import-skill \\
+    --spec canonical-spec.yaml \\
+    --skill node_modules/@anthropic/claude-skills-cpp/memory-safety.json
 
   node scripts/agent-jump-start.mjs list-agents
 
@@ -545,6 +550,64 @@ function cleanDirectoryIfExists(directoryPath) {
   }
 }
 
+function validateSkill(skill, sourcePath) {
+  const required = ["slug", "name", "title", "description", "version", "appliesWhen", "categories", "rules"];
+  const missing = required.filter((key) => !skill[key]);
+  if (missing.length > 0) {
+    throw new Error(
+      `Invalid skill in ${sourcePath}: missing required fields: ${missing.join(", ")}.\n` +
+      `A valid skill needs: ${required.join(", ")}.`
+    );
+  }
+  if (!Array.isArray(skill.categories) || skill.categories.length === 0) {
+    throw new Error(`Invalid skill "${skill.slug}" in ${sourcePath}: categories must be a non-empty array.`);
+  }
+  if (!Array.isArray(skill.rules) || skill.rules.length === 0) {
+    throw new Error(`Invalid skill "${skill.slug}" in ${sourcePath}: rules must be a non-empty array.`);
+  }
+  for (const rule of skill.rules) {
+    if (!rule.id || !rule.category || !rule.title || !rule.summary) {
+      throw new Error(
+        `Invalid rule in skill "${skill.slug}": each rule needs id, category, title, and summary. ` +
+        `Found: ${JSON.stringify(rule)}`
+      );
+    }
+  }
+}
+
+function readExternalSkill(filePath) {
+  const absolutePath = resolve(filePath);
+  const content = readFileSync(absolutePath, "utf8");
+
+  // Try JSON first (covers .yaml-as-json and .json files)
+  try {
+    const parsed = JSON.parse(content);
+    // Could be a single skill object or a wrapper with a "skill" or "skills" key
+    if (parsed.slug && parsed.rules) {
+      return [parsed];
+    }
+    if (parsed.skill && parsed.skill.slug) {
+      return [parsed.skill];
+    }
+    if (Array.isArray(parsed.skills)) {
+      return parsed.skills;
+    }
+    if (Array.isArray(parsed)) {
+      return parsed;
+    }
+    throw new Error(`Could not find skill data in ${filePath}. Expected a skill object with "slug" and "rules", or a wrapper with "skill" or "skills" key.`);
+  } catch (jsonError) {
+    if (jsonError instanceof SyntaxError) {
+      throw new Error(
+        `Cannot parse ${filePath}. The file must be valid JSON (YAML-as-JSON subset).\n` +
+        `If you have a YAML or Markdown skill file, convert it to JSON first.\n` +
+        `Parse error: ${jsonError.message}`
+      );
+    }
+    throw jsonError;
+  }
+}
+
 function assertRequired(options, key, command) {
   if (options[key]) {
     return;
@@ -650,6 +713,51 @@ function main() {
     for (const agent of agents) {
       console.log(`  ${agent.name.padEnd(22)} ${agent.files}`);
     }
+    return;
+  }
+
+  if (command === "import-skill") {
+    assertRequired(options, "spec", command);
+    assertRequired(options, "skill", command);
+    const specPath = resolve(options.spec);
+    if (!existsSync(specPath)) {
+      throw new Error(`Canonical spec not found: ${specPath}. Run bootstrap first.`);
+    }
+    const spec = readJsonYaml(options.spec);
+    const importedSkills = readExternalSkill(options.skill);
+
+    if (!Array.isArray(spec.skills)) {
+      spec.skills = [];
+    }
+
+    let added = 0;
+    let replaced = 0;
+    for (const skill of importedSkills) {
+      validateSkill(skill, options.skill);
+      const existingIndex = spec.skills.findIndex((s) => s.slug === skill.slug);
+      if (existingIndex >= 0) {
+        if (options.replace) {
+          spec.skills[existingIndex] = skill;
+          replaced += 1;
+          console.log(`  Replaced: ${skill.slug} (v${skill.version})`);
+        } else {
+          console.log(`  Skipped:  ${skill.slug} (already exists, use --replace to overwrite)`);
+          continue;
+        }
+      } else {
+        if (!skill.author) {
+          skill.author = "Imported";
+        }
+        spec.skills.push(skill);
+        added += 1;
+        console.log(`  Added:    ${skill.slug} (v${skill.version})`);
+      }
+    }
+
+    writeFileSync(specPath, stringifyJsonYaml(spec), "utf8");
+    console.log(`\nImport complete: ${added} added, ${replaced} replaced in ${options.spec}`);
+    console.log(`Total skills in spec: ${spec.skills.length}`);
+    console.log(`\nRun 'render' to regenerate instruction files for all 9 agents.`);
     return;
   }
 

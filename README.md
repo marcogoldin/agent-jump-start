@@ -58,6 +58,7 @@ Available example profiles:
 |---|---|
 | `specs/profiles/react-vite-mui.profile.yaml` | React + Vite + Material UI |
 | `specs/profiles/php-laravel.profile.yaml` | PHP 8.3 + Laravel |
+| `specs/profiles/c-cpp.profile.yaml` | C/C++ with CMake, sanitizers, memory safety |
 
 If neither fits, duplicate one and adjust it, or skip the profile and customize the base spec directly.
 
@@ -120,7 +121,33 @@ node docs/agent-jump-start/scripts/agent-jump-start.mjs check \
 
 Use this in CI pipelines or pre-commit hooks to enforce alignment.
 
-### 7. Use prompt templates
+### 7. Import external skills (optional)
+
+Import skills from external JSON files (downloaded from npm packages, GitHub repos, or community sources):
+
+```bash
+# Import a skill from a local file
+node docs/agent-jump-start/scripts/agent-jump-start.mjs import-skill \
+  --spec docs/agent-jump-start/canonical-spec.yaml \
+  --skill path/to/external-skill.json
+
+# Import and overwrite an existing skill with the same slug
+node docs/agent-jump-start/scripts/agent-jump-start.mjs import-skill \
+  --spec docs/agent-jump-start/canonical-spec.yaml \
+  --skill path/to/updated-skill.json \
+  --replace
+```
+
+After importing, run `render` + `check` to propagate the new skill to all 9 agent targets.
+
+The import command accepts:
+- A single skill object (`{ "slug": "...", "rules": [...] }`)
+- A wrapper with a `skill` key (`{ "skill": { ... } }`)
+- A wrapper with a `skills` array (`{ "skills": [ ... ] }`)
+
+Duplicate slugs are skipped unless `--replace` is passed.
+
+### 8. Use prompt templates
 
 Pick a prompt from `docs/agent-jump-start/prompts/` and paste it into any supported agent:
 
@@ -270,6 +297,11 @@ node scripts/agent-jump-start.mjs render \
 # Verify sync (CI-friendly, exits 1 on drift)
 node scripts/agent-jump-start.mjs check \
   --spec canonical-spec.yaml --target .
+
+# Import an external skill into the canonical spec
+node scripts/agent-jump-start.mjs import-skill \
+  --spec canonical-spec.yaml \
+  --skill path/to/skill.json [--replace]
 ```
 
 ## Folder Layout
@@ -284,6 +316,7 @@ agent-jump-start/
   specs/
     base-spec.yaml
     profiles/
+      c-cpp.profile.yaml
       php-laravel.profile.yaml
       react-vite-mui.profile.yaml
   prompts/
