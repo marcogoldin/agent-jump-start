@@ -1,0 +1,271 @@
+{
+  "project": {
+    "name": "PHP Laravel Repository",
+    "summary": "Laravel-oriented repository with synchronized AI agent instructions.",
+    "components": [
+      "backend: Laravel application using PHP 8.3 and Composer",
+      "frontend: optional asset pipeline or admin UI if present"
+    ]
+  },
+  "workspaceInstructions": {
+    "packageManagerRule": "Use `composer` for PHP dependencies. Use `npm` only if the repository already contains frontend tooling that depends on it.",
+    "runtimeRule": "Use PHP 8.3 locally and in production. Keep Composer and framework versions aligned with the project's supported matrix.",
+    "sections": [
+      {
+        "title": "General rules",
+        "rules": [
+          "Prefer small, reviewable changes that preserve current behavior unless a feature or bug fix requires a contract change.",
+          "Keep code compatible with the repository's supported PHP and Laravel versions.",
+          "Preserve accessibility, validation, auth boundaries, and environment-driven configuration.",
+          "Favor dependency injection, explicit services, DTOs, policies, and form requests over controller-heavy logic.",
+          "Avoid avoidable query waterfalls, repeated database work, and hidden side effects in model accessors or global scopes."
+        ]
+      },
+      {
+        "title": "Laravel rules",
+        "rules": [
+          "Keep controllers thin and move business logic into dedicated services, actions, jobs, or domain classes.",
+          "Use request validation, policies, gates, and middleware consistently rather than ad hoc authorization checks in views.",
+          "Prefer eager loading, query scopes, and explicit repository or service boundaries when data access becomes non-trivial.",
+          "Keep secrets in environment variables and never expose private credentials or tokens to the frontend.",
+          "Preserve queue, cache, event, notification, and API response contracts unless the task explicitly changes them."
+        ]
+      },
+      {
+        "title": "Testing rules",
+        "rules": [
+          "Prefer Pest or PHPUnit feature tests for HTTP behavior and focused unit tests for domain logic.",
+          "When changing validation, policies, serialization, or database writes, add or update tests that cover the contract.",
+          "Use factories and seed data intentionally; keep fixtures minimal and deterministic."
+        ]
+      }
+    ],
+    "validation": [
+      "Run `composer test` if the repository provides it.",
+      "Run `php artisan test` or the repository's equivalent test command.",
+      "Run static analysis and formatting commands such as `./vendor/bin/phpstan` and `./vendor/bin/pint` when available."
+    ]
+  },
+  "reviewChecklist": {
+    "intro": "Checklist for verifying whether a PHP or Laravel-oriented proposal really follows the repository rules instead of generic framework advice.",
+    "failureThreshold": 2,
+    "items": [
+      {
+        "title": "Reflects the real PHP and Laravel runtime constraints.",
+        "details": [
+          "The answer should use the real PHP version, Composer workflow, and framework conventions of the repository."
+        ]
+      },
+      {
+        "title": "Keeps Laravel transport, domain, and data-access concerns separated.",
+        "details": [
+          "Controllers, requests, policies, actions, services, and queries should remain coherent with the project's existing architecture."
+        ]
+      },
+      {
+        "title": "Preserves validation, auth, serialization, and operational contracts.",
+        "details": [
+          "API payloads, policies, events, queues, cache usage, and migrations should not drift unintentionally."
+        ]
+      },
+      {
+        "title": "Uses explicit validation and testing.",
+        "details": [
+          "Changes that affect HTTP behavior, database writes, auth, or serialization should usually add or update tests."
+        ]
+      }
+    ],
+    "quickSignals": [
+      "Thin controllers and explicit services or actions.",
+      "Form requests, policies, or middleware instead of scattered checks.",
+      "Validation commands mention tests, static analysis, and formatting."
+    ],
+    "redFlags": [
+      "Business logic embedded in controllers or views.",
+      "Unbounded Eloquent queries or lazy relation access inside loops.",
+      "Hardcoded secrets, deploy-specific values, or silent contract changes."
+    ]
+  },
+  "skills": [
+    {
+      "slug": "php-best-practices",
+      "name": "php-best-practices",
+      "title": "PHP Best Practices",
+      "description": "Pragmatic rules for maintainable modern PHP application code.",
+      "version": "1.0.0",
+      "author": "Agent Jump Start",
+      "appliesWhen": [
+        "Writing or reviewing PHP application code",
+        "Refactoring services, DTOs, commands, or controllers",
+        "Designing repository-level coding rules for backend teams"
+      ],
+      "categories": [
+        {
+          "priority": 1,
+          "name": "Language Rules",
+          "impact": "HIGH",
+          "prefix": "language-"
+        },
+        {
+          "priority": 2,
+          "name": "Architecture Rules",
+          "impact": "HIGH",
+          "prefix": "architecture-"
+        },
+        {
+          "priority": 3,
+          "name": "Safety Rules",
+          "impact": "MEDIUM",
+          "prefix": "safety-"
+        }
+      ],
+      "rules": [
+        {
+          "id": "language-strict-types",
+          "category": "Language Rules",
+          "title": "Use strict types and explicit signatures",
+          "impact": "HIGH",
+          "summary": "Default to strict typing, typed properties, and explicit parameter and return types.",
+          "guidance": [
+            "Use value objects or DTOs when array shapes become non-trivial.",
+            "Avoid mixed data structures unless the framework contract forces them."
+          ]
+        },
+        {
+          "id": "language-small-methods",
+          "category": "Language Rules",
+          "title": "Keep methods cohesive",
+          "impact": "HIGH",
+          "summary": "Prefer short, single-purpose methods over large procedural classes.",
+          "guidance": [
+            "Extract private helpers or dedicated services when branching grows.",
+            "Name methods by behavior rather than by implementation detail."
+          ]
+        },
+        {
+          "id": "architecture-explicit-dependencies",
+          "category": "Architecture Rules",
+          "title": "Use constructor injection for real dependencies",
+          "impact": "HIGH",
+          "summary": "Make dependencies explicit through the container rather than hidden static helpers.",
+          "guidance": [
+            "Prefer injected collaborators over service locator lookups in deep business logic.",
+            "Keep framework facades at the edge when possible."
+          ]
+        },
+        {
+          "id": "architecture-domain-boundaries",
+          "category": "Architecture Rules",
+          "title": "Separate transport concerns from domain concerns",
+          "impact": "HIGH",
+          "summary": "Move request parsing, serialization, and side effects out of core domain services.",
+          "guidance": [
+            "Controllers should orchestrate rather than own business rules.",
+            "Use DTOs, actions, or command objects when a flow has multiple steps."
+          ]
+        },
+        {
+          "id": "safety-no-silent-failures",
+          "category": "Safety Rules",
+          "title": "Fail explicitly on invalid state",
+          "impact": "MEDIUM",
+          "summary": "Do not hide invalid inputs or impossible states behind silent fallbacks.",
+          "guidance": [
+            "Throw domain exceptions or return explicit error objects where the codebase expects them.",
+            "Add focused tests when changing failure behavior."
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "laravel-architecture",
+      "name": "laravel-architecture",
+      "title": "Laravel Architecture",
+      "description": "Laravel-specific rules for controllers, validation, authorization, and data access.",
+      "version": "1.0.0",
+      "author": "Agent Jump Start",
+      "appliesWhen": [
+        "Working on Laravel HTTP endpoints, jobs, queues, or console commands",
+        "Reviewing Eloquent queries or request validation flows",
+        "Defining repo-local conventions for Laravel teams"
+      ],
+      "categories": [
+        {
+          "priority": 1,
+          "name": "HTTP and Validation",
+          "impact": "HIGH",
+          "prefix": "http-"
+        },
+        {
+          "priority": 2,
+          "name": "Data Access",
+          "impact": "HIGH",
+          "prefix": "data-"
+        },
+        {
+          "priority": 3,
+          "name": "Operations",
+          "impact": "MEDIUM",
+          "prefix": "ops-"
+        }
+      ],
+      "rules": [
+        {
+          "id": "http-form-requests",
+          "category": "HTTP and Validation",
+          "title": "Centralize validation and authorization",
+          "impact": "HIGH",
+          "summary": "Use form requests, policies, gates, and middleware instead of scattering checks across controllers and views.",
+          "guidance": [
+            "Keep validation messages and rules close to the transport layer.",
+            "Prefer policy methods for resource-level authorization."
+          ]
+        },
+        {
+          "id": "http-api-contracts",
+          "category": "HTTP and Validation",
+          "title": "Preserve API contracts intentionally",
+          "impact": "HIGH",
+          "summary": "Do not change payload shape, status codes, or resource serialization casually.",
+          "guidance": [
+            "Call out breaking changes explicitly in review notes and documentation.",
+            "Cover serialization changes with feature tests."
+          ]
+        },
+        {
+          "id": "data-eager-loading",
+          "category": "Data Access",
+          "title": "Prevent avoidable N+1 queries",
+          "impact": "HIGH",
+          "summary": "Use eager loading and query shaping when related data is known up front.",
+          "guidance": [
+            "Measure hot paths before adding abstraction purely for style.",
+            "Avoid lazy relation access in loops."
+          ]
+        },
+        {
+          "id": "data-query-boundaries",
+          "category": "Data Access",
+          "title": "Keep queries predictable",
+          "impact": "HIGH",
+          "summary": "Hide non-trivial query composition behind scopes, repositories, or dedicated query services.",
+          "guidance": [
+            "Keep controller query code short and explicit.",
+            "Avoid mixing pagination, filtering, and serialization logic in the same method."
+          ]
+        },
+        {
+          "id": "ops-env-config",
+          "category": "Operations",
+          "title": "Prefer environment-driven runtime configuration",
+          "impact": "MEDIUM",
+          "summary": "Keep secrets and deploy-specific values in environment or config files, not hardcoded in classes.",
+          "guidance": [
+            "Do not expose private credentials to browser code.",
+            "Preserve queue, cache, and notification contracts unless the task requires a deliberate change."
+          ]
+        }
+      ]
+    }
+  ]
+}
