@@ -30,7 +30,7 @@
     "ide"
   ],
   "author": "Marco Goldin",
-  "license": "MIT",
+  "license": "MPL-2.0",
   "repository": {
     "type": "git",
     "url": "https://github.com/marcogoldin/agent-jump-start.git"

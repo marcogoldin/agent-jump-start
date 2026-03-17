@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 
@@ -321,7 +325,7 @@ function renderSkillDescriptor(skill, specRelativePath) {
     "---",
     `name: ${skill.name}`,
     `description: ${skill.description}`,
-    "license: MIT",
+    "license: MPL-2.0",
     "metadata:",
     `  author: ${skill.author}`,
     `  version: "${skill.version}"`,
