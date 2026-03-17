@@ -320,4 +320,6 @@ If Node.js is not desired, you can:
 
 ## License
 
-MIT - see [LICENSE](LICENSE) for details.
+[Mozilla Public License 2.0](LICENSE) (MPL-2.0).
+
+You are free to use, modify, and distribute this software. If you modify any of the source files, the modified files must remain open source under MPL-2.0. You can combine this project with proprietary code in a larger work without affecting the license of the larger work. Attribution is required.
