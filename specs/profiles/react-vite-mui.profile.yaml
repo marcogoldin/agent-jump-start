@@ -1,0 +1,238 @@
+{
+  "project": {
+    "name": "React Vite MUI Repository",
+    "summary": "React-oriented repository with synchronized AI agent instructions.",
+    "components": [
+      "frontend: React application using Vite and MUI",
+      "backend: optional API services or middleware if present"
+    ]
+  },
+  "workspaceInstructions": {
+    "packageManagerRule": "Use the package manager already adopted by the repository and do not introduce alternatives without an explicit decision.",
+    "runtimeRule": "Keep local development and production aligned on the repository's supported Node and browser targets.",
+    "sections": [
+      {
+        "title": "General rules",
+        "rules": [
+          "Prefer small, reviewable changes that preserve current behavior unless the task explicitly changes a feature or contract.",
+          "Preserve accessibility, responsive behavior, and SSR-safe browser API usage.",
+          "Avoid avoidable request waterfalls and parallelize independent async work.",
+          "Prefer composition over boolean-prop proliferation in React components.",
+          "Keep bundle size under control and avoid unnecessary barrel imports or heavy dependencies."
+        ]
+      },
+      {
+        "title": "React rules",
+        "rules": [
+          "Derive state during render when possible and avoid using effects for simple derived state.",
+          "Avoid defining components inside other components unless there is a clear reason.",
+          "Use `startTransition`, `useDeferredValue`, or refs for non-urgent or transient UI state when appropriate.",
+          "Prefer composition, explicit variants, and context-based patterns over boolean mode props.",
+          "Move interaction logic into event handlers when an effect is not required for synchronization."
+        ]
+      },
+      {
+        "title": "MUI rules",
+        "rules": [
+          "Use theme tokens first: palette, spacing, typography, breakpoints, and component variants.",
+          "Prefer semantic MUI primitives and accessible labels over custom div-heavy layouts.",
+          "Avoid repeated magic colors, spacing values, and z-index numbers."
+        ]
+      }
+    ],
+    "validation": [
+      "Run the repository's lint command.",
+      "Run the repository's build command.",
+      "Run relevant test commands when the repository provides them."
+    ]
+  },
+  "reviewChecklist": {
+    "intro": "Checklist for verifying whether a React-oriented proposal really follows the repository rules instead of generic frontend advice.",
+    "failureThreshold": 2,
+    "items": [
+      {
+        "title": "Reflects the real frontend stack and runtime constraints.",
+        "details": [
+          "The answer should reference the actual runtime, package manager, framework, component library, and validation commands."
+        ]
+      },
+      {
+        "title": "Uses React patterns that preserve clarity and rendering performance.",
+        "details": [
+          "The proposal should avoid unnecessary effects, avoidable inline component definitions, and boolean-prop proliferation."
+        ]
+      },
+      {
+        "title": "Uses design-system primitives before ad hoc styling.",
+        "details": [
+          "The solution should favor theme tokens, semantic primitives, and reusable patterns over magic values and repeated one-off styles."
+        ]
+      },
+      {
+        "title": "Avoids unnecessary data and bundle cost.",
+        "details": [
+          "The change should not introduce avoidable waterfalls, heavy dependencies, or careless import patterns."
+        ]
+      }
+    ],
+    "quickSignals": [
+      "Derived state stays in render when possible.",
+      "Composition is preferred over mode flags.",
+      "Validation commands mention lint, build, and tests when present."
+    ],
+    "redFlags": [
+      "Effects used for simple derived state.",
+      "Large components with many boolean mode props.",
+      "Repeated inline styles, magic colors, or unnecessary barrel imports."
+    ]
+  },
+  "skills": [
+    {
+      "slug": "react-best-practices",
+      "name": "react-best-practices",
+      "title": "React Best Practices",
+      "description": "Performance and maintainability rules for modern React applications.",
+      "version": "1.0.0",
+      "author": "Agent Jump Start",
+      "appliesWhen": [
+        "Writing or reviewing React components",
+        "Refactoring client-side data flows or rendering behavior",
+        "Defining repo-local performance and maintainability rules"
+      ],
+      "categories": [
+        {
+          "priority": 1,
+          "name": "Async and Data Flow",
+          "impact": "HIGH",
+          "prefix": "async-"
+        },
+        {
+          "priority": 2,
+          "name": "Re-render Control",
+          "impact": "HIGH",
+          "prefix": "rerender-"
+        },
+        {
+          "priority": 3,
+          "name": "Bundle Control",
+          "impact": "MEDIUM",
+          "prefix": "bundle-"
+        }
+      ],
+      "rules": [
+        {
+          "id": "async-parallel",
+          "category": "Async and Data Flow",
+          "title": "Start independent async work early",
+          "impact": "HIGH",
+          "summary": "Avoid avoidable waterfalls by starting independent promises before awaiting them.",
+          "guidance": [
+            "Use `Promise.all` for independent work.",
+            "If a dependency chain exists, still start the earliest possible work immediately."
+          ]
+        },
+        {
+          "id": "rerender-derived-state",
+          "category": "Re-render Control",
+          "title": "Derive state during render",
+          "impact": "HIGH",
+          "summary": "Do not move simple derived state into effects or unnecessary memoization.",
+          "guidance": [
+            "Reserve effects for synchronization with the outside world.",
+            "Keep primitive expressions inline unless there is a proven performance reason."
+          ]
+        },
+        {
+          "id": "rerender-no-inline-components",
+          "category": "Re-render Control",
+          "title": "Do not define components inside components by default",
+          "impact": "HIGH",
+          "summary": "Keep component identity stable and logic easier to review by extracting nested component definitions.",
+          "guidance": [
+            "Use separate components or helper render functions when it keeps state boundaries clear.",
+            "Make exceptions only when locality clearly beats reuse and performance concerns."
+          ]
+        },
+        {
+          "id": "bundle-direct-imports",
+          "category": "Bundle Control",
+          "title": "Avoid unnecessary barrel imports",
+          "impact": "MEDIUM",
+          "summary": "Import directly from the module that owns the code when barrels increase bundle cost or blur ownership.",
+          "guidance": [
+            "Lazy-load heavy routes or components when the repository already uses code splitting.",
+            "Be explicit about any new dependency that affects bundle size."
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "component-composition",
+      "name": "component-composition",
+      "title": "Component Composition Patterns",
+      "description": "Patterns for building flexible component APIs without boolean prop proliferation.",
+      "version": "1.0.0",
+      "author": "Agent Jump Start",
+      "appliesWhen": [
+        "Designing reusable component APIs",
+        "Refactoring components with many mode flags",
+        "Reviewing UI architecture and context usage"
+      ],
+      "categories": [
+        {
+          "priority": 1,
+          "name": "Architecture",
+          "impact": "HIGH",
+          "prefix": "architecture-"
+        },
+        {
+          "priority": 2,
+          "name": "State Management",
+          "impact": "MEDIUM",
+          "prefix": "state-"
+        },
+        {
+          "priority": 3,
+          "name": "Variants",
+          "impact": "MEDIUM",
+          "prefix": "variants-"
+        }
+      ],
+      "rules": [
+        {
+          "id": "architecture-avoid-boolean-props",
+          "category": "Architecture",
+          "title": "Avoid boolean mode props",
+          "impact": "HIGH",
+          "summary": "Do not accumulate `isFoo` and `hasBar` flags when explicit composition would make states clearer.",
+          "guidance": [
+            "Prefer compound components or explicit variants.",
+            "Make impossible states impossible to represent."
+          ]
+        },
+        {
+          "id": "state-lift-provider-state",
+          "category": "State Management",
+          "title": "Lift shared state to the boundary that owns it",
+          "impact": "MEDIUM",
+          "summary": "Keep state near the provider or parent that coordinates siblings, not duplicated across leaf components.",
+          "guidance": [
+            "Expose state, actions, and metadata through a stable interface.",
+            "Keep UI components focused on rendering and interaction."
+          ]
+        },
+        {
+          "id": "variants-explicit-components",
+          "category": "Variants",
+          "title": "Create explicit variants instead of flag matrices",
+          "impact": "MEDIUM",
+          "summary": "Use dedicated components for materially different layouts or workflows.",
+          "guidance": [
+            "Share internal primitives without forcing every mode through one component signature.",
+            "Name variants after user intent rather than implementation detail."
+          ]
+        }
+      ]
+    }
+  ]
+}

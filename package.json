@@ -1,0 +1,41 @@
+{
+  "name": "agent-jump-start",
+  "version": "1.2.0",
+  "description": "Portable starter kit for keeping AI coding assistant instructions synchronized across 9 agent ecosystems from one canonical specification.",
+  "type": "module",
+  "main": "scripts/agent-jump-start.mjs",
+  "bin": {
+    "agent-jump-start": "scripts/agent-jump-start.mjs"
+  },
+  "scripts": {
+    "bootstrap": "node scripts/agent-jump-start.mjs bootstrap --base specs/base-spec.yaml",
+    "render": "node scripts/agent-jump-start.mjs render --spec canonical-spec.yaml --target .",
+    "check": "node scripts/agent-jump-start.mjs check --spec canonical-spec.yaml --target .",
+    "list-agents": "node scripts/agent-jump-start.mjs list-agents"
+  },
+  "keywords": [
+    "ai",
+    "coding-assistant",
+    "claude",
+    "copilot",
+    "cursor",
+    "windsurf",
+    "cline",
+    "aider",
+    "agent",
+    "instructions",
+    "memory-injection",
+    "developer-tools",
+    "vscode",
+    "ide"
+  ],
+  "author": "Marco Goldin",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/marcogoldin/agent-jump-start.git"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

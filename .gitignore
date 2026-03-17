@@ -1,0 +1,169 @@
+# =============================================================================
+# Agent Jump Start - Comprehensive .gitignore
+# Covers: macOS, Windows, Linux, Node.js, IDEs, and generated output
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Operating System Files
+# -----------------------------------------------------------------------------
+
+# macOS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+.AppleDouble
+.LSOverride
+Icon?
+.fseventsd
+.TemporaryItems
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+Desktop.ini
+$RECYCLE.BIN/
+*.stackdump
+[Dd]esktop.ini
+
+# Windows shortcuts
+*.lnk
+
+# Linux
+*~
+.directory
+.Trash-*
+.nfs*
+
+# -----------------------------------------------------------------------------
+# IDEs and Editors
+# -----------------------------------------------------------------------------
+
+# VS Code (keep .vscode/settings.json and extensions.json if desired)
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+!.vscode/launch.json
+*.code-workspace
+
+# JetBrains (IntelliJ, WebStorm, PhpStorm, PyCharm, etc.)
+.idea/
+*.iml
+*.iws
+*.ipr
+out/
+
+# Vim / Neovim
+*.swp
+*.swo
+*.swn
+*~
+Session.vim
+.netrwhist
+tags
+
+# Emacs
+*~
+\#*\#
+.#*
+*.elc
+auto-save-list
+
+# Sublime Text
+*.sublime-workspace
+*.sublime-project
+
+# TextMate
+*.tmproj
+*.tmproject
+tmtags
+
+# Nova
+.nova/
+
+# Fleet
+.fleet/
+
+# -----------------------------------------------------------------------------
+# Node.js
+# -----------------------------------------------------------------------------
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.pnpm-store/
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+.npm
+.yarn/
+!.yarn/patches
+!.yarn/releases
+!.yarn/plugins
+!.yarn/sdks
+!.yarn/versions
+
+# -----------------------------------------------------------------------------
+# Runtime and Build Artifacts
+# -----------------------------------------------------------------------------
+dist/
+build/
+tmp/
+temp/
+*.log
+*.pid
+*.seed
+*.pid.lock
+.cache/
+.parcel-cache/
+
+# Coverage
+coverage/
+*.lcov
+.nyc_output/
+
+# Environment
+.env
+.env.local
+.env.*.local
+.env.development
+.env.test
+.env.production
+
+# -----------------------------------------------------------------------------
+# Agent Jump Start - Generated Output
+# (These are generated in the TARGET project, not in this template repo.
+#  Uncomment the lines below if you want to ignore them in the target project.)
+# -----------------------------------------------------------------------------
+# canonical-spec.yaml
+# AGENTS.md
+# CLAUDE.md
+# CONVENTIONS.md
+# .windsurfrules
+# .clinerules
+# .github/copilot-instructions.md
+# .cursor/rules/agent-instructions.mdc
+# .roo/rules/agent-instructions.md
+# .continue/rules/agent-instructions.md
+# .agents/
+# .claude/
+# docs/agent-review-checklist.md
+# docs/agent-jump-start/generated-manifest.json
+
+# -----------------------------------------------------------------------------
+# Miscellaneous
+# -----------------------------------------------------------------------------
+*.bak
+*.orig
+*.patch
+*.diff
+*.rej
+.eslintcache
+.stylelintcache
+.prettiercache

@@ -1,0 +1,64 @@
+{
+  "schemaVersion": 1,
+  "project": {
+    "name": "Replace this project name",
+    "summary": "Portable AI instruction system generated from one canonical spec.",
+    "components": [
+      "Replace this list with the real applications, services, or packages in the repository."
+    ]
+  },
+  "workspaceInstructions": {
+    "packageManagerRule": "Use the package managers already chosen by the repository. Do not introduce alternatives unless the project explicitly asks for them.",
+    "runtimeRule": "Keep local development and production aligned on the same supported runtime versions.",
+    "sections": [
+      {
+        "title": "General rules",
+        "rules": [
+          "Prefer small, reviewable changes that preserve current behavior unless the task explicitly asks for a behavior change.",
+          "Preserve accessibility, security boundaries, and SSR-safe browser API usage where relevant.",
+          "Avoid avoidable request waterfalls and unnecessary bundle or runtime cost.",
+          "Prefer explicit, composable architecture over hidden flags, ad hoc branching, or duplicated logic.",
+          "Update project documentation whenever runtime requirements, setup, or operational behavior change."
+        ]
+      }
+    ],
+    "validation": [
+      "Document the baseline validation commands for this repository and keep them current."
+    ]
+  },
+  "reviewChecklist": {
+    "intro": "Baseline checklist to verify whether an AI-assisted change really follows the repository rules instead of generic advice.",
+    "failureThreshold": 2,
+    "items": [
+      {
+        "title": "Reflects repository constraints, not generic best practices.",
+        "details": [
+          "The answer should reference the real stack, runtime expectations, package managers, validation commands, and project conventions."
+        ]
+      },
+      {
+        "title": "Preserves architecture and contracts.",
+        "details": [
+          "The change should respect the current layering, public APIs, and user-visible behavior unless a deliberate contract change is requested."
+        ]
+      },
+      {
+        "title": "Avoids unnecessary complexity.",
+        "details": [
+          "The change should avoid ad hoc abstractions, avoidable waterfalls, and duplicated logic."
+        ]
+      }
+    ],
+    "quickSignals": [
+      "Uses the repository's real validation and runtime constraints.",
+      "Preserves behavior unless the task explicitly asks for a contract change.",
+      "Keeps agent instruction files and mirrored skills in sync."
+    ],
+    "redFlags": [
+      "Generic tutorial advice without project-specific constraints.",
+      "Hand-edited generated instruction files with no canonical spec update.",
+      "Large refactors that ignore existing boundaries without a clear reason."
+    ]
+  },
+  "skills": []
+}
