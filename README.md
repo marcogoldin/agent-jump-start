@@ -131,7 +131,7 @@ docs/agent-review-checklist.md             # Review checklist
 docs/agent-jump-start/generated-manifest.json
 ```
 
-> **Skill propagation:** Agents with native skill folder support (Claude Code, GitHub Copilot, GitHub Agents, Cursor) get native skill artifacts. Other agents receive inline skill summaries directly in their workspace instruction file, so no agent misses skill guidance.
+> **Skill propagation:** `.agents/skills/` is the canonical portable skill tree. Claude Code and GitHub Copilot receive synchronized mirrors of those canonical skill packages, Cursor receives projected MDC rules, and other agents receive inline skill summaries in their workspace instruction file.
 
 #### 6. Verify sync
 
@@ -237,7 +237,7 @@ canonical-spec.yaml          (single source of truth)
 The canonical spec acts as a **memory injection layer** for all coding assistants:
 
 1. **Rules** defined once in the spec are rendered into each agent's native instruction format
-2. **Skills** (reusable rule sets) are rendered as standards-aligned `SKILL.md` packages and mirrored into agent-native locations
+2. **Skills** (reusable rule sets) are first rendered into canonical `.agents/skills/<slug>/` packages, then mirrored or projected into agent-native locations
 3. **Review checklists** aggregate all rules into a verification document
 4. Every generated file includes a notice pointing back to the canonical spec, discouraging hand-edits
 
@@ -308,6 +308,7 @@ This means whichever assistant you use — Claude, Copilot, Cursor, or any other
 | Cursor MDC format with frontmatter | Native Cursor rules support with `alwaysApply` and `description` |
 | Manifest with file list | Enables stale file detection, cleanup, and CI enforcement |
 | Skills as first-class objects | Reusable across projects; composable via profiles |
+| `.agents/skills/` as canonical output | One portable source of truth before agent-specific mirrors |
 | Standards-aligned `SKILL.md` generation | Portable across Claude, GitHub, and other Agent Skills-compatible clients |
 | Skill references as first-class assets | Supports progressive disclosure and portable multi-file skill packages |
 | Inline skill summaries for non-native agents | Every agent gets skill guidance, even without skill folder support |
