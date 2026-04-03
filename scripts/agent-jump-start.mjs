@@ -3,45 +3,34 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { dirname, join, relative, resolve } from "node:path";
+import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { join, relative, resolve } from "node:path";
 
-const TOOL_VERSION = "1.3.0";
+import { TOOL_VERSION, SUPPORTED_AGENTS, AGENT_COUNT } from "../lib/constants.mjs";
+import { parseArgs, assertRequired, readJsonYaml, stringifyJsonYaml, deepMerge, ensureDirectory } from "../lib/utils.mjs";
+import { validateSpec, validateSkill, validateSkillMdFrontmatter } from "../lib/validation.mjs";
+import { renderGeneratedFiles } from "../lib/renderers.mjs";
+import { writeGeneratedFiles, checkGeneratedFiles, cleanStaleFiles, cleanDirectoryIfExists, discoverPackageRoot, listAvailableProfiles, listManagedFiles } from "../lib/files.mjs";
+import { readExternalSkill, readSkillMdFile, readSkillDirectory, exportSkillPackage, parseSkillMdFrontmatter } from "../lib/skills.mjs";
+import { CANONICAL_SPEC_SCHEMA } from "../lib/schema.mjs";
 
-function parseArgs(argv) {
-  const [command, ...rest] = argv;
-  const options = {};
-
-  for (let index = 0; index < rest.length; index += 1) {
-    const token = rest[index];
-    if (!token.startsWith("--")) {
-      continue;
-    }
-
-    const key = token.slice(2);
-    const next = rest[index + 1];
-    if (!next || next.startsWith("--")) {
-      options[key] = true;
-      continue;
-    }
-
-    options[key] = next;
-    index += 1;
-  }
-
-  return { command, options };
-}
+// ---------------------------------------------------------------------------
+// Usage
+// ---------------------------------------------------------------------------
 
 function usage() {
   console.log(`Agent Jump Start v${TOOL_VERSION}
 
 Commands:
-  init         [--profile <path>] [--target <path>]
-  bootstrap    --base <path> [--profile <path>] [--output <path>]
-  render       --spec <path> [--target <path>] [--clean]
-  check        --spec <path> [--target <path>]
-  validate     --spec <path>
-  import-skill --spec <path> --skill <path> [--replace]
+  init           [--profile <path>] [--target <path>]
+  bootstrap      --base <path> [--profile <path>] [--output <path>]
+  render         --spec <path> [--target <path>] [--clean]
+  check          --spec <path> [--target <path>]
+  validate       --spec <path>
+  validate-skill <path>   (SKILL.md file or skill directory)
+  import-skill   --spec <path> --skill <path> [--replace]
+  export-skill   --spec <path> --slug <slug> --output <path>
+  export-schema  [--output <path>]
   list-agents
   list-profiles
 
@@ -67,17 +56,26 @@ Examples:
   node scripts/agent-jump-start.mjs validate \\
     --spec canonical-spec.yaml
 
+  node scripts/agent-jump-start.mjs validate-skill \\
+    path/to/skills/python-pro
+
   node scripts/agent-jump-start.mjs import-skill \\
     --spec canonical-spec.yaml \\
-    --skill node_modules/@anthropic/claude-skills-cpp/memory-safety.json
+    --skill path/to/skills/python-pro
+
+  node scripts/agent-jump-start.mjs export-skill \\
+    --spec canonical-spec.yaml --slug react-best-practices \\
+    --output ./exported-skills/react-best-practices
+
+  node scripts/agent-jump-start.mjs export-schema
 
   node scripts/agent-jump-start.mjs list-agents
   node scripts/agent-jump-start.mjs list-profiles
 
 Supported Agents:
-  Claude Code          CLAUDE.md, .claude/skills/*/AGENTS.md
-  GitHub Copilot       .github/copilot-instructions.md
-  GitHub Agents        AGENTS.md, .agents/skills/*/SKILL.md, .agents/skills/*/AGENTS.md
+  Claude Code          CLAUDE.md, .claude/skills/*/SKILL.md
+  GitHub Copilot       .github/copilot-instructions.md, .github/skills/*/SKILL.md
+  GitHub Agents        AGENTS.md, .agents/skills/*/SKILL.md
   Cursor               .cursor/rules/agent-instructions.mdc
   Windsurf (Codeium)   .windsurfrules
   Cline                .clinerules
@@ -87,753 +85,9 @@ Supported Agents:
 `);
 }
 
-function readJsonYaml(filePath) {
-  const absolutePath = resolve(filePath);
-  return JSON.parse(readFileSync(absolutePath, "utf8"));
-}
-
-function stringifyJsonYaml(value) {
-  return `${JSON.stringify(value, null, 2)}\n`;
-}
-
-function deepMerge(baseValue, overlayValue) {
-  if (overlayValue === undefined) {
-    return structuredClone(baseValue);
-  }
-
-  if (baseValue === null || overlayValue === null) {
-    return structuredClone(overlayValue);
-  }
-
-  if (Array.isArray(baseValue) || Array.isArray(overlayValue)) {
-    return structuredClone(overlayValue);
-  }
-
-  if (typeof baseValue !== "object" || typeof overlayValue !== "object") {
-    return structuredClone(overlayValue);
-  }
-
-  const merged = { ...baseValue };
-  for (const [key, value] of Object.entries(overlayValue)) {
-    if (!(key in merged)) {
-      merged[key] = structuredClone(value);
-      continue;
-    }
-    merged[key] = deepMerge(merged[key], value);
-  }
-  return merged;
-}
-
-function ensureDirectory(filePath) {
-  mkdirSync(dirname(filePath), { recursive: true });
-}
-
-function formatBulletList(items) {
-  return items.map((item) => `- ${item}`).join("\n");
-}
-
-function generatedNotice(specRelativePath) {
-  return `> Generated by Agent Jump Start v${TOOL_VERSION} from \`${specRelativePath}\`.\n> Update the canonical spec and rerun \`render\` instead of hand-editing this file.\n`;
-}
-
-function renderSkillSummarySection(skill) {
-  const lines = [
-    `### ${skill.title}`,
-    "",
-    `**Version ${skill.version}** — ${skill.author}`,
-    "",
-    skill.description,
-    "",
-    "**When to apply:** " + skill.appliesWhen.join("; "),
-    "",
-    renderQuickReference(skill),
-    "",
-  ];
-  return lines.join("\n").trimEnd();
-}
-
-function renderWorkspaceInstructions(spec, specRelativePath, { includeSkillSummaries = false } = {}) {
-  const lines = [
-    "# Workspace Instructions",
-    "",
-    generatedNotice(specRelativePath).trimEnd(),
-    "",
-  ];
-
-  const workspace = spec.workspaceInstructions;
-  if (workspace.packageManagerRule) {
-    lines.push(workspace.packageManagerRule, "");
-  }
-  if (workspace.runtimeRule) {
-    lines.push(workspace.runtimeRule, "");
-  }
-  if (spec.project?.components?.length) {
-    lines.push("This workspace contains:");
-    for (const component of spec.project.components) {
-      lines.push(`- ${component}`);
-    }
-    lines.push("");
-  }
-
-  for (const section of workspace.sections ?? []) {
-    lines.push(`${section.title}:`);
-    lines.push(formatBulletList(section.rules));
-    lines.push("");
-  }
-
-  if (workspace.validation?.length) {
-    lines.push("Validation rules:");
-    lines.push(formatBulletList(workspace.validation));
-    lines.push("");
-  }
-
-  // Skill fallback: inline skill summaries for agents without native skill folders
-  if (includeSkillSummaries && spec.skills?.length) {
-    lines.push("## Skills", "");
-    for (const skill of spec.skills) {
-      lines.push(renderSkillSummarySection(skill), "");
-    }
-  }
-
-  return `${lines.join("\n").trimEnd()}\n`;
-}
-
-function renderCursorMdc(spec, specRelativePath) {
-  const workspace = spec.workspaceInstructions;
-  const bodyLines = [];
-
-  if (workspace.packageManagerRule) {
-    bodyLines.push(workspace.packageManagerRule, "");
-  }
-  if (workspace.runtimeRule) {
-    bodyLines.push(workspace.runtimeRule, "");
-  }
-  if (spec.project?.components?.length) {
-    bodyLines.push("This workspace contains:");
-    for (const component of spec.project.components) {
-      bodyLines.push(`- ${component}`);
-    }
-    bodyLines.push("");
-  }
-
-  for (const section of workspace.sections ?? []) {
-    bodyLines.push(`## ${section.title}`, "");
-    bodyLines.push(formatBulletList(section.rules));
-    bodyLines.push("");
-  }
-
-  if (workspace.validation?.length) {
-    bodyLines.push("## Validation rules", "");
-    bodyLines.push(formatBulletList(workspace.validation));
-    bodyLines.push("");
-  }
-
-  const description = spec.project?.summary ?? "Workspace instructions generated by Agent Jump Start";
-
-  const lines = [
-    "---",
-    `description: ${description}`,
-    "alwaysApply: true",
-    "---",
-    "",
-    `# ${spec.project?.name ?? "Workspace Instructions"}`,
-    "",
-    `> Generated by Agent Jump Start v${TOOL_VERSION} from \`${specRelativePath}\`.`,
-    "",
-    ...bodyLines,
-  ];
-
-  return `${lines.join("\n").trimEnd()}\n`;
-}
-
-function renderCursorSkillMdc(skill, specRelativePath) {
-  const lines = [
-    "---",
-    `description: ${skill.description}`,
-    "alwaysApply: false",
-    "---",
-    "",
-    `# ${skill.title}`,
-    "",
-    `> Generated by Agent Jump Start v${TOOL_VERSION} from \`${specRelativePath}\`.`,
-    "",
-    `**Version ${skill.version}** - ${skill.author}`,
-    "",
-    "## When to Apply",
-    "",
-    formatBulletList(skill.appliesWhen),
-    "",
-    "## Quick Reference",
-    "",
-    renderQuickReference(skill),
-    "",
-    renderDetailedGuidance(skill),
-    "",
-  ];
-
-  return `${lines.join("\n").trimEnd()}\n`;
-}
-
-function renderCategoryTable(categories) {
-  const lines = [
-    "| Priority | Category | Impact | Prefix |",
-    "|----------|----------|--------|--------|",
-  ];
-
-  for (const category of categories) {
-    lines.push(
-      `| ${category.priority} | ${category.name} | ${category.impact} | \`${category.prefix}\` |`,
-    );
-  }
-
-  return lines.join("\n");
-}
-
-function groupRulesByCategory(skill) {
-  return skill.categories.map((category) => ({
-    ...category,
-    rules: skill.rules.filter((rule) => rule.category === category.name),
-  }));
-}
-
-function renderQuickReference(skill) {
-  const lines = [];
-
-  for (const category of groupRulesByCategory(skill)) {
-    lines.push(`### ${category.priority}. ${category.name} (${category.impact})`, "");
-    for (const rule of category.rules) {
-      lines.push(`- \`${rule.id}\` - ${rule.summary}`);
-    }
-    lines.push("");
-  }
-
-  return lines.join("\n").trimEnd();
-}
-
-function renderDetailedGuidance(skill) {
-  const lines = ["## Detailed Guidance", ""];
-
-  for (const category of groupRulesByCategory(skill)) {
-    lines.push(`### ${category.name}`, "");
-    for (const rule of category.rules) {
-      lines.push(`#### ${rule.id} - ${rule.title}`, "");
-      lines.push(`**Impact:** ${rule.impact}`, "");
-      lines.push(rule.summary, "");
-      if (rule.guidance?.length) {
-        lines.push(formatBulletList(rule.guidance), "");
-      }
-    }
-  }
-
-  return lines.join("\n").trimEnd();
-}
-
-function renderSkillGuide(skill, specRelativePath) {
-  const lines = [
-    `# ${skill.title}`,
-    "",
-    `**Version ${skill.version}**  `,
-    `${skill.author}`,
-    "",
-    generatedNotice(specRelativePath).trimEnd(),
-    "",
-    "## Abstract",
-    "",
-    skill.description,
-    "",
-    "## When to Apply",
-    "",
-    formatBulletList(skill.appliesWhen),
-    "",
-    "## Rule Categories by Priority",
-    "",
-    renderCategoryTable(skill.categories),
-    "",
-    "## Quick Reference",
-    "",
-    renderQuickReference(skill),
-    "",
-    renderDetailedGuidance(skill),
-    "",
-  ];
-
-  return `${lines.join("\n").trimEnd()}\n`;
-}
-
-function renderSkillDescriptor(skill, specRelativePath) {
-  const lines = [
-    "---",
-    `name: ${skill.name}`,
-    `description: ${skill.description}`,
-    "license: MPL-2.0",
-    "metadata:",
-    `  author: ${skill.author}`,
-    `  version: "${skill.version}"`,
-    "---",
-    "",
-    `# ${skill.title}`,
-    "",
-    generatedNotice(specRelativePath).trimEnd(),
-    "",
-    "## When to Apply",
-    "",
-    formatBulletList(skill.appliesWhen),
-    "",
-    "## Rule Categories by Priority",
-    "",
-    renderCategoryTable(skill.categories),
-    "",
-    "## Quick Reference",
-    "",
-    renderQuickReference(skill),
-    "",
-    "## How to Use",
-    "",
-    `Read \`.agents/skills/${skill.slug}/AGENTS.md\` for the full expanded guidance and keep the mirrored Claude file aligned.`,
-    "",
-  ];
-
-  return `${lines.join("\n").trimEnd()}\n`;
-}
-
-function renderGeneratedFiles(spec, specPath, targetRoot) {
-  const specAbsolutePath = resolve(specPath);
-  const targetAbsolutePath = resolve(targetRoot);
-  const specRelativePath = relative(targetAbsolutePath, specAbsolutePath) || specPath;
-  const generatedFiles = {};
-
-  const workspaceDoc = renderWorkspaceInstructions(spec, specRelativePath);
-  const workspaceDocWithSkills = renderWorkspaceInstructions(spec, specRelativePath, { includeSkillSummaries: true });
-
-  // --- Agents with native skill folder support (get workspace-only doc) ---
-  // --- GitHub Agents ---
-  generatedFiles["AGENTS.md"] = workspaceDoc;
-
-  // --- Claude Code ---
-  generatedFiles["CLAUDE.md"] = workspaceDoc;
-
-  // --- Cursor (MDC format with frontmatter) ---
-  generatedFiles[".cursor/rules/agent-instructions.mdc"] = renderCursorMdc(spec, specRelativePath);
-
-  // --- Agents WITHOUT native skill folders (get workspace doc + inline skill summaries) ---
-  // --- GitHub Copilot ---
-  generatedFiles[".github/copilot-instructions.md"] = workspaceDocWithSkills;
-
-  // --- Windsurf (Codeium) ---
-  generatedFiles[".windsurfrules"] = workspaceDocWithSkills;
-
-  // --- Cline ---
-  generatedFiles[".clinerules"] = workspaceDocWithSkills;
-
-  // --- Roo Code ---
-  generatedFiles[".roo/rules/agent-instructions.md"] = workspaceDocWithSkills;
-
-  // --- Continue.dev ---
-  generatedFiles[".continue/rules/agent-instructions.md"] = workspaceDocWithSkills;
-
-  // --- Aider ---
-  generatedFiles["CONVENTIONS.md"] = workspaceDocWithSkills;
-
-  // --- Skills ---
-  for (const skill of spec.skills ?? []) {
-    const agentsSkillDir = `.agents/skills/${skill.slug}`;
-    const claudeSkillDir = `.claude/skills/${skill.slug}`;
-
-    generatedFiles[`${agentsSkillDir}/SKILL.md`] = renderSkillDescriptor(skill, specRelativePath);
-
-    const guide = renderSkillGuide(skill, specRelativePath);
-    generatedFiles[`${agentsSkillDir}/AGENTS.md`] = guide;
-    generatedFiles[`${claudeSkillDir}/AGENTS.md`] = guide;
-
-    // Cursor skill files (MDC format)
-    generatedFiles[`.cursor/rules/${skill.slug}.mdc`] = renderCursorSkillMdc(skill, specRelativePath);
-  }
-
-  // --- Review Checklist ---
-  if (spec.reviewChecklist) {
-    generatedFiles["docs/agent-review-checklist.md"] = renderReviewChecklist(
-      spec,
-      specRelativePath,
-    );
-  }
-
-  // --- Manifest ---
-  const manifestPath = "docs/agent-jump-start/generated-manifest.json";
-  generatedFiles[manifestPath] = `${JSON.stringify(
-    {
-      generatedFrom: specRelativePath,
-      generatorVersion: TOOL_VERSION,
-      agents: [
-        "Claude Code",
-        "GitHub Copilot",
-        "GitHub Agents",
-        "Cursor",
-        "Windsurf",
-        "Cline",
-        "Roo Code",
-        "Continue.dev",
-        "Aider",
-      ],
-      files: Object.keys(generatedFiles).sort(),
-    },
-    null,
-    2,
-  )}\n`;
-
-  return generatedFiles;
-}
-
-function renderReviewChecklist(spec, specRelativePath) {
-  const references = [
-    "AGENTS.md",
-    "CLAUDE.md",
-    ".github/copilot-instructions.md",
-    ".cursor/rules/agent-instructions.mdc",
-    ".windsurfrules",
-    ".clinerules",
-    ".roo/rules/agent-instructions.md",
-    ".continue/rules/agent-instructions.md",
-    "CONVENTIONS.md",
-    ...(spec.skills ?? []).flatMap((skill) => [
-      `.agents/skills/${skill.slug}/AGENTS.md`,
-      `.claude/skills/${skill.slug}/AGENTS.md`,
-      `.cursor/rules/${skill.slug}.mdc`,
-    ]),
-  ];
-  const checklist = spec.reviewChecklist;
-  const lines = [
-    "# Review Checklist For Agents",
-    "",
-    generatedNotice(specRelativePath).trimEnd(),
-    "",
-    checklist.intro,
-    "",
-    "## Usage",
-    "",
-    `Treat a response or proposal as misaligned if it fails ${checklist.failureThreshold} or more checks without a deliberate reason.`,
-    "",
-    "## Checklist",
-    "",
-  ];
-
-  checklist.items.forEach((item, index) => {
-    lines.push(`${index + 1}. ${item.title}`, "");
-    for (const detail of item.details ?? []) {
-      lines.push(`   ${detail}`, "");
-    }
-  });
-
-  if (checklist.quickSignals?.length) {
-    lines.push("## Quick Signals", "");
-    lines.push(formatBulletList(checklist.quickSignals), "");
-  }
-
-  if (checklist.redFlags?.length) {
-    lines.push("## Red Flags", "");
-    lines.push(formatBulletList(checklist.redFlags), "");
-  }
-
-  lines.push("## References", "");
-  lines.push(formatBulletList(references), "");
-
-  return `${lines.join("\n").trimEnd()}\n`;
-}
-
-function writeGeneratedFiles(generatedFiles, targetRoot) {
-  for (const [relativePath, content] of Object.entries(generatedFiles)) {
-    const absolutePath = join(resolve(targetRoot), relativePath);
-    ensureDirectory(absolutePath);
-    writeFileSync(absolutePath, content, "utf8");
-  }
-}
-
-function checkGeneratedFiles(generatedFiles, targetRoot) {
-  const targetAbsolutePath = resolve(targetRoot);
-  const failures = [];
-  const passes = [];
-
-  for (const [relativePath, expectedContent] of Object.entries(generatedFiles)) {
-    const absolutePath = join(targetAbsolutePath, relativePath);
-    if (!existsSync(absolutePath)) {
-      failures.push(`Missing generated file: ${relativePath}`);
-      continue;
-    }
-
-    const actualContent = readFileSync(absolutePath, "utf8");
-    if (actualContent !== expectedContent) {
-      failures.push(`Out of sync: ${relativePath}`);
-      continue;
-    }
-
-    passes.push(`OK ${relativePath}`);
-  }
-
-  const manifestPath = join(targetAbsolutePath, "docs/agent-jump-start/generated-manifest.json");
-  if (existsSync(manifestPath)) {
-    const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
-    const expectedPaths = new Set(Object.keys(generatedFiles));
-    for (const relativePath of manifest.files ?? []) {
-      if (!expectedPaths.has(relativePath) && existsSync(join(targetAbsolutePath, relativePath))) {
-        failures.push(`Stale managed file still exists: ${relativePath}`);
-      }
-    }
-  }
-
-  return { failures, passes };
-}
-
-function cleanDirectoryIfExists(directoryPath) {
-  if (existsSync(directoryPath)) {
-    rmSync(directoryPath, { recursive: true, force: true });
-  }
-}
-
-function validateSkill(skill, sourcePath) {
-  const required = ["slug", "name", "title", "description", "version", "appliesWhen", "categories", "rules"];
-  const missing = required.filter((key) => !skill[key]);
-  if (missing.length > 0) {
-    throw new Error(
-      `Invalid skill in ${sourcePath}: missing required fields: ${missing.join(", ")}.\n` +
-      `A valid skill needs: ${required.join(", ")}.`
-    );
-  }
-  if (!Array.isArray(skill.categories) || skill.categories.length === 0) {
-    throw new Error(`Invalid skill "${skill.slug}" in ${sourcePath}: categories must be a non-empty array.`);
-  }
-  if (!Array.isArray(skill.rules) || skill.rules.length === 0) {
-    throw new Error(`Invalid skill "${skill.slug}" in ${sourcePath}: rules must be a non-empty array.`);
-  }
-  for (const rule of skill.rules) {
-    if (!rule.id || !rule.category || !rule.title || !rule.summary) {
-      throw new Error(
-        `Invalid rule in skill "${skill.slug}": each rule needs id, category, title, and summary. ` +
-        `Found: ${JSON.stringify(rule)}`
-      );
-    }
-  }
-}
-
-function validateSpec(spec, sourcePath) {
-  const errors = [];
-
-  // schemaVersion
-  if (spec.schemaVersion === undefined) {
-    errors.push("Missing required field: schemaVersion");
-  } else if (typeof spec.schemaVersion !== "number" || spec.schemaVersion < 1) {
-    errors.push(`Invalid schemaVersion: expected a positive integer, got ${JSON.stringify(spec.schemaVersion)}`);
-  }
-
-  // project
-  if (!spec.project) {
-    errors.push("Missing required field: project");
-  } else {
-    if (!spec.project.name || typeof spec.project.name !== "string") {
-      errors.push("project.name is required and must be a non-empty string");
-    }
-    if (!spec.project.summary || typeof spec.project.summary !== "string") {
-      errors.push("project.summary is required and must be a non-empty string");
-    }
-    if (spec.project.components !== undefined && !Array.isArray(spec.project.components)) {
-      errors.push("project.components must be an array if present");
-    }
-  }
-
-  // workspaceInstructions
-  if (!spec.workspaceInstructions) {
-    errors.push("Missing required field: workspaceInstructions");
-  } else {
-    const ws = spec.workspaceInstructions;
-    if (ws.sections !== undefined) {
-      if (!Array.isArray(ws.sections)) {
-        errors.push("workspaceInstructions.sections must be an array if present");
-      } else {
-        for (let i = 0; i < ws.sections.length; i++) {
-          const section = ws.sections[i];
-          if (!section.title || typeof section.title !== "string") {
-            errors.push(`workspaceInstructions.sections[${i}].title is required and must be a string`);
-          }
-          if (!Array.isArray(section.rules) || section.rules.length === 0) {
-            errors.push(`workspaceInstructions.sections[${i}].rules must be a non-empty array`);
-          }
-        }
-      }
-    }
-    if (ws.validation !== undefined && !Array.isArray(ws.validation)) {
-      errors.push("workspaceInstructions.validation must be an array if present");
-    }
-  }
-
-  // reviewChecklist (optional but validated if present)
-  if (spec.reviewChecklist !== undefined) {
-    const rc = spec.reviewChecklist;
-    if (!rc.intro || typeof rc.intro !== "string") {
-      errors.push("reviewChecklist.intro is required and must be a string");
-    }
-    if (typeof rc.failureThreshold !== "number" || rc.failureThreshold < 1) {
-      errors.push("reviewChecklist.failureThreshold must be a positive number");
-    }
-    if (!Array.isArray(rc.items) || rc.items.length === 0) {
-      errors.push("reviewChecklist.items must be a non-empty array");
-    } else {
-      for (let i = 0; i < rc.items.length; i++) {
-        if (!rc.items[i].title || typeof rc.items[i].title !== "string") {
-          errors.push(`reviewChecklist.items[${i}].title is required and must be a string`);
-        }
-      }
-    }
-  }
-
-  // skills (optional but validated if present)
-  if (spec.skills !== undefined) {
-    if (!Array.isArray(spec.skills)) {
-      errors.push("skills must be an array if present");
-    } else {
-      const slugs = new Set();
-      for (let i = 0; i < spec.skills.length; i++) {
-        const skill = spec.skills[i];
-        try {
-          validateSkill(skill, `${sourcePath} -> skills[${i}]`);
-        } catch (err) {
-          errors.push(err.message);
-        }
-        if (skill.slug) {
-          if (slugs.has(skill.slug)) {
-            errors.push(`Duplicate skill slug: "${skill.slug}" at skills[${i}]`);
-          }
-          slugs.add(skill.slug);
-        }
-      }
-    }
-  }
-
-  if (errors.length > 0) {
-    const header = `Spec validation failed for ${sourcePath} (${errors.length} error${errors.length > 1 ? "s" : ""}):`;
-    const body = errors.map((e, i) => `  ${i + 1}. ${e}`).join("\n");
-    throw new Error(`${header}\n${body}`);
-  }
-}
-
-function cleanStaleFiles(generatedFiles, targetRoot) {
-  const targetAbsolutePath = resolve(targetRoot);
-  const manifestPath = join(targetAbsolutePath, "docs/agent-jump-start/generated-manifest.json");
-  const removed = [];
-
-  if (!existsSync(manifestPath)) {
-    return removed;
-  }
-
-  const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
-  const expectedPaths = new Set(Object.keys(generatedFiles));
-
-  for (const relativePath of manifest.files ?? []) {
-    if (!expectedPaths.has(relativePath)) {
-      const absolutePath = join(targetAbsolutePath, relativePath);
-      if (existsSync(absolutePath)) {
-        rmSync(absolutePath, { force: true });
-        removed.push(relativePath);
-
-        // Remove empty parent directories up to target root
-        let dir = dirname(absolutePath);
-        while (dir !== targetAbsolutePath && dir.startsWith(targetAbsolutePath)) {
-          try {
-            const entries = readdirSync(dir);
-            if (entries.length === 0) {
-              rmSync(dir, { force: true });
-              dir = dirname(dir);
-            } else {
-              break;
-            }
-          } catch {
-            break;
-          }
-        }
-      }
-    }
-  }
-
-  return removed;
-}
-
-function discoverPackageRoot() {
-  // Walk up from cwd to find package.json with "agent-jump-start" or the scripts dir
-  const scriptDir = dirname(new URL(import.meta.url).pathname);
-  return resolve(scriptDir, "..");
-}
-
-function listAvailableProfiles() {
-  const packageRoot = discoverPackageRoot();
-  const profileDir = join(packageRoot, "specs", "profiles");
-  if (!existsSync(profileDir)) {
-    return [];
-  }
-  return readdirSync(profileDir)
-    .filter((f) => f.endsWith(".profile.yaml"))
-    .map((f) => ({
-      file: f,
-      path: join(profileDir, f),
-      name: f.replace(".profile.yaml", ""),
-    }));
-}
-
-function readExternalSkill(filePath) {
-  const absolutePath = resolve(filePath);
-  const content = readFileSync(absolutePath, "utf8");
-
-  // Try JSON first (covers .yaml-as-json and .json files)
-  try {
-    const parsed = JSON.parse(content);
-    // Could be a single skill object or a wrapper with a "skill" or "skills" key
-    if (parsed.slug && parsed.rules) {
-      return [parsed];
-    }
-    if (parsed.skill && parsed.skill.slug) {
-      return [parsed.skill];
-    }
-    if (Array.isArray(parsed.skills)) {
-      return parsed.skills;
-    }
-    if (Array.isArray(parsed)) {
-      return parsed;
-    }
-    throw new Error(`Could not find skill data in ${filePath}. Expected a skill object with "slug" and "rules", or a wrapper with "skill" or "skills" key.`);
-  } catch (jsonError) {
-    if (jsonError instanceof SyntaxError) {
-      throw new Error(
-        `Cannot parse ${filePath}. The file must be valid JSON (YAML-as-JSON subset).\n` +
-        `If you have a YAML or Markdown skill file, convert it to JSON first.\n` +
-        `Parse error: ${jsonError.message}`
-      );
-    }
-    throw jsonError;
-  }
-}
-
-function assertRequired(options, key, command) {
-  if (options[key]) {
-    return;
-  }
-  throw new Error(`Missing required --${key} for '${command}'`);
-}
-
-function listManagedFiles(rootPath) {
-  const entries = [];
-
-  function walk(currentPath) {
-    for (const entry of readdirSync(currentPath)) {
-      const absolutePath = join(currentPath, entry);
-      const relativePath = relative(rootPath, absolutePath);
-      const stats = statSync(absolutePath);
-      if (stats.isDirectory()) {
-        walk(absolutePath);
-        continue;
-      }
-      entries.push(relativePath);
-    }
-  }
-
-  walk(rootPath);
-  return entries.sort();
-}
+// ---------------------------------------------------------------------------
+// Main
+// ---------------------------------------------------------------------------
 
 function main() {
   const args = process.argv.slice(2);
@@ -850,6 +104,9 @@ function main() {
 
   const { command, options } = parseArgs(args);
 
+  // -------------------------------------------------------------------
+  // init
+  // -------------------------------------------------------------------
   if (command === "init") {
     const packageRoot = discoverPackageRoot();
     const targetRoot = resolve(options.target ?? ".");
@@ -857,19 +114,24 @@ function main() {
     const basePath = join(packageRoot, "specs", "base-spec.yaml");
     const specOutputPath = join(ajsDir, "canonical-spec.yaml");
 
-    // Step 1: Copy the AJS framework into the target project
     console.log("Initializing Agent Jump Start...\n");
 
     const filesToCopy = [
       "README.md", "LICENSE", "package.json",
       "scripts/agent-jump-start.mjs",
+      "lib/constants.mjs",
+      "lib/utils.mjs",
+      "lib/validation.mjs",
+      "lib/renderers.mjs",
+      "lib/files.mjs",
+      "lib/skills.mjs",
+      "lib/schema.mjs",
       "specs/base-spec.yaml",
       "prompts/01-bootstrap-any-agent.md",
       "prompts/02-change-stack-or-guidelines.md",
       "prompts/03-add-or-update-skill.md",
     ];
 
-    // Also copy profiles
     const profiles = listAvailableProfiles();
     for (const profile of profiles) {
       filesToCopy.push(`specs/profiles/${profile.file}`);
@@ -885,7 +147,6 @@ function main() {
     }
     console.log(`  Copied framework to ${relative(targetRoot, ajsDir) || ajsDir}`);
 
-    // Step 2: Bootstrap canonical spec
     const baseSpec = readJsonYaml(basePath);
     let mergedSpec = baseSpec;
     if (options.profile) {
@@ -900,17 +161,15 @@ function main() {
       console.log("");
     }
 
-    // Validate before writing
     validateSpec(mergedSpec, "init");
 
     ensureDirectory(specOutputPath);
     writeFileSync(specOutputPath, stringifyJsonYaml(mergedSpec), "utf8");
     console.log(`  Created canonical spec: ${relative(targetRoot, specOutputPath) || specOutputPath}`);
 
-    // Step 3: Render all instruction files
-    const generatedFiles = renderGeneratedFiles(mergedSpec, relative(targetRoot, specOutputPath) || specOutputPath, targetRoot);
+    const generatedFiles = renderGeneratedFiles(mergedSpec, specOutputPath, targetRoot);
     writeGeneratedFiles(generatedFiles, targetRoot);
-    console.log(`  Rendered ${Object.keys(generatedFiles).length} instruction files across 9 agent targets`);
+    console.log(`  Rendered ${Object.keys(generatedFiles).length} instruction files across ${AGENT_COUNT} agent targets`);
 
     const specRel = relative(targetRoot, specOutputPath);
     const scriptRel = relative(targetRoot, join(ajsDir, "scripts/agent-jump-start.mjs"));
@@ -922,6 +181,9 @@ function main() {
     return;
   }
 
+  // -------------------------------------------------------------------
+  // bootstrap
+  // -------------------------------------------------------------------
   if (command === "bootstrap") {
     assertRequired(options, "base", command);
     const baseSpec = readJsonYaml(options.base);
@@ -929,7 +191,6 @@ function main() {
       ? deepMerge(baseSpec, readJsonYaml(options.profile))
       : baseSpec;
 
-    // Validate the merged spec
     const outputPath = resolve(options.output ?? "canonical-spec.yaml");
     validateSpec(mergedSpec, outputPath);
 
@@ -939,17 +200,18 @@ function main() {
     return;
   }
 
+  // -------------------------------------------------------------------
+  // render
+  // -------------------------------------------------------------------
   if (command === "render") {
     assertRequired(options, "spec", command);
     const targetRoot = resolve(options.target ?? ".");
     const spec = readJsonYaml(options.spec);
 
-    // Validate spec before rendering
     validateSpec(spec, options.spec);
 
     const generatedFiles = renderGeneratedFiles(spec, options.spec, targetRoot);
 
-    // Clean stale files before writing new ones
     if (options.clean) {
       const removed = cleanStaleFiles(generatedFiles, targetRoot);
       if (removed.length > 0) {
@@ -966,16 +228,18 @@ function main() {
     for (const filePath of Object.keys(generatedFiles).sort()) {
       console.log(`  ${filePath}`);
     }
-    console.log(`\nTotal: ${Object.keys(generatedFiles).length} files across 9 agent targets`);
+    console.log(`\nTotal: ${Object.keys(generatedFiles).length} files across ${AGENT_COUNT} agent targets`);
     return;
   }
 
+  // -------------------------------------------------------------------
+  // check
+  // -------------------------------------------------------------------
   if (command === "check") {
     assertRequired(options, "spec", command);
     const targetRoot = resolve(options.target ?? ".");
     const spec = readJsonYaml(options.spec);
 
-    // Validate spec before checking
     validateSpec(spec, options.spec);
 
     const generatedFiles = renderGeneratedFiles(spec, options.spec, targetRoot);
@@ -994,6 +258,9 @@ function main() {
     return;
   }
 
+  // -------------------------------------------------------------------
+  // validate
+  // -------------------------------------------------------------------
   if (command === "validate") {
     assertRequired(options, "spec", command);
     const spec = readJsonYaml(options.spec);
@@ -1005,6 +272,71 @@ function main() {
     return;
   }
 
+  // -------------------------------------------------------------------
+  // validate-skill (external SKILL.md or directory)
+  // -------------------------------------------------------------------
+  if (command === "validate-skill") {
+    const skillPath = args[1];
+    if (!skillPath) {
+      throw new Error("Usage: validate-skill <path-to-SKILL.md-or-directory>");
+    }
+
+    const absolutePath = resolve(skillPath);
+
+    // Directory with SKILL.md
+    if (existsSync(join(absolutePath, "SKILL.md"))) {
+      const content = readFileSync(join(absolutePath, "SKILL.md"), "utf8");
+      const { frontmatter, body } = parseSkillMdFrontmatter(content);
+
+      if (!frontmatter) {
+        throw new Error(`${skillPath}/SKILL.md: missing YAML frontmatter block.`);
+      }
+
+      const errors = validateSkillMdFrontmatter(frontmatter, `${skillPath}/SKILL.md`);
+      if (errors.length > 0) {
+        throw new Error(`Validation failed:\n${errors.map((e) => `  - ${e}`).join("\n")}`);
+      }
+
+      console.log(`SKILL.md validation passed: ${skillPath}/SKILL.md`);
+      console.log(`  name: ${frontmatter.name}`);
+      console.log(`  description: ${frontmatter.description.slice(0, 80)}...`);
+
+      // Check for references
+      const refsDir = join(absolutePath, "references");
+      if (existsSync(refsDir)) {
+        const refFiles = readdirSync(refsDir).filter((f) => f.endsWith(".md"));
+        console.log(`  references: ${refFiles.length} file(s)`);
+      }
+
+      return;
+    }
+
+    // Standalone SKILL.md file
+    if (absolutePath.endsWith(".md") && existsSync(absolutePath)) {
+      const content = readFileSync(absolutePath, "utf8");
+      const { frontmatter } = parseSkillMdFrontmatter(content);
+
+      if (!frontmatter) {
+        throw new Error(`${skillPath}: missing YAML frontmatter block.`);
+      }
+
+      const errors = validateSkillMdFrontmatter(frontmatter, skillPath);
+      if (errors.length > 0) {
+        throw new Error(`Validation failed:\n${errors.map((e) => `  - ${e}`).join("\n")}`);
+      }
+
+      console.log(`SKILL.md validation passed: ${skillPath}`);
+      console.log(`  name: ${frontmatter.name}`);
+      console.log(`  description: ${frontmatter.description.slice(0, 80)}...`);
+      return;
+    }
+
+    throw new Error(`${skillPath}: not a valid SKILL.md file or skill directory.`);
+  }
+
+  // -------------------------------------------------------------------
+  // list-profiles
+  // -------------------------------------------------------------------
   if (command === "list-profiles") {
     const profiles = listAvailableProfiles();
     if (profiles.length === 0) {
@@ -1018,25 +350,20 @@ function main() {
     return;
   }
 
+  // -------------------------------------------------------------------
+  // list-agents
+  // -------------------------------------------------------------------
   if (command === "list-agents") {
     console.log(`Agent Jump Start v${TOOL_VERSION} - Supported Agents\n`);
-    const agents = [
-      { name: "Claude Code",       files: "CLAUDE.md, .claude/skills/*/AGENTS.md" },
-      { name: "GitHub Copilot",    files: ".github/copilot-instructions.md" },
-      { name: "GitHub Agents",     files: "AGENTS.md, .agents/skills/*/SKILL.md" },
-      { name: "Cursor",            files: ".cursor/rules/*.mdc" },
-      { name: "Windsurf (Codeium)",files: ".windsurfrules" },
-      { name: "Cline",             files: ".clinerules" },
-      { name: "Roo Code",          files: ".roo/rules/*.md" },
-      { name: "Continue.dev",      files: ".continue/rules/*.md" },
-      { name: "Aider",             files: "CONVENTIONS.md" },
-    ];
-    for (const agent of agents) {
+    for (const agent of SUPPORTED_AGENTS) {
       console.log(`  ${agent.name.padEnd(22)} ${agent.files}`);
     }
     return;
   }
 
+  // -------------------------------------------------------------------
+  // import-skill
+  // -------------------------------------------------------------------
   if (command === "import-skill") {
     assertRequired(options, "spec", command);
     assertRequired(options, "skill", command);
@@ -1078,10 +405,58 @@ function main() {
     writeFileSync(specPath, stringifyJsonYaml(spec), "utf8");
     console.log(`\nImport complete: ${added} added, ${replaced} replaced in ${options.spec}`);
     console.log(`Total skills in spec: ${spec.skills.length}`);
-    console.log(`\nRun 'render' to regenerate instruction files for all 9 agents.`);
+    console.log(`\nRun 'render' to regenerate instruction files for all ${AGENT_COUNT} agents.`);
     return;
   }
 
+  // -------------------------------------------------------------------
+  // export-skill
+  // -------------------------------------------------------------------
+  if (command === "export-skill") {
+    assertRequired(options, "spec", command);
+    assertRequired(options, "slug", command);
+    assertRequired(options, "output", command);
+
+    const spec = readJsonYaml(options.spec);
+    validateSpec(spec, options.spec);
+
+    const skill = (spec.skills ?? []).find((s) => s.slug === options.slug);
+    if (!skill) {
+      const available = (spec.skills ?? []).map((s) => s.slug).join(", ");
+      throw new Error(
+        `Skill "${options.slug}" not found in ${options.spec}.\n` +
+        `Available skills: ${available || "(none)"}`,
+      );
+    }
+
+    const created = exportSkillPackage(skill, options.output);
+    console.log(`Exported skill "${skill.slug}" to ${options.output}:`);
+    for (const file of created) {
+      console.log(`  ${file}`);
+    }
+    return;
+  }
+
+  // -------------------------------------------------------------------
+  // export-schema
+  // -------------------------------------------------------------------
+  if (command === "export-schema") {
+    const output = options.output ?? "canonical-spec.schema.json";
+    const schemaJson = JSON.stringify(CANONICAL_SPEC_SCHEMA, null, 2) + "\n";
+
+    if (output === "-") {
+      process.stdout.write(schemaJson);
+    } else {
+      ensureDirectory(resolve(output));
+      writeFileSync(resolve(output), schemaJson, "utf8");
+      console.log(`Schema written to ${output}`);
+    }
+    return;
+  }
+
+  // -------------------------------------------------------------------
+  // demo commands
+  // -------------------------------------------------------------------
   if (command === "demo-clean") {
     assertRequired(options, "target", command);
     const targetRoot = resolve(options.target);

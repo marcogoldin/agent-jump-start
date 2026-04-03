@@ -16,8 +16,8 @@ Agent Jump Start solves this with one canonical YAML/JSON spec that feeds a zero
 
 | Agent | IDE / Environment | Instruction Files |
 |---|---|---|
-| **Claude Code** | VS Code, JetBrains, CLI | `CLAUDE.md`, `.claude/skills/*/AGENTS.md` |
-| **GitHub Copilot** | VS Code, JetBrains, Neovim | `.github/copilot-instructions.md` |
+| **Claude Code** | VS Code, JetBrains, CLI | `CLAUDE.md`, `.claude/skills/*/SKILL.md` |
+| **GitHub Copilot** | VS Code, JetBrains, Neovim | `.github/copilot-instructions.md`, `.github/skills/*/SKILL.md` |
 | **GitHub Agents** | GitHub (cloud) | `AGENTS.md`, `.agents/skills/*/SKILL.md` |
 | **Cursor** | Cursor (VS Code fork) | `.cursor/rules/*.mdc` |
 | **Windsurf** | Windsurf / Codeium (VS Code fork) | `.windsurfrules` |
@@ -115,21 +115,23 @@ This generates synchronized instruction files for all 9 supported agents:
 AGENTS.md                                  # GitHub Agents
 CLAUDE.md                                  # Claude Code
 CONVENTIONS.md                             # Aider (with inline skill summaries)
-.github/copilot-instructions.md            # GitHub Copilot (with inline skill summaries)
+.github/copilot-instructions.md            # GitHub Copilot workspace instructions
+.github/skills/<slug>/SKILL.md             # GitHub Copilot native skill package
 .cursor/rules/agent-instructions.mdc       # Cursor
 .cursor/rules/<skill-slug>.mdc             # Cursor (per skill)
 .windsurfrules                             # Windsurf (with inline skill summaries)
 .clinerules                                # Cline (with inline skill summaries)
 .roo/rules/agent-instructions.md           # Roo Code (with inline skill summaries)
 .continue/rules/agent-instructions.md      # Continue.dev (with inline skill summaries)
-.agents/skills/<slug>/SKILL.md             # GitHub Agents (skill descriptor)
-.agents/skills/<slug>/AGENTS.md            # GitHub Agents (skill guide)
-.claude/skills/<slug>/AGENTS.md            # Claude Code (skill guide)
+.agents/skills/<slug>/SKILL.md             # GitHub Agents native skill package
+.agents/skills/<slug>/AGENTS.md            # Backward-compatible expanded skill mirror
+.claude/skills/<slug>/SKILL.md             # Claude Code native skill package
+.claude/skills/<slug>/AGENTS.md            # Backward-compatible expanded skill mirror
 docs/agent-review-checklist.md             # Review checklist
 docs/agent-jump-start/generated-manifest.json
 ```
 
-> **Skill propagation:** Agents with native skill folder support (Claude Code, GitHub Agents, Cursor) get full skill files. All other agents receive inline skill summaries directly in their workspace instruction file, so no agent misses skill guidance.
+> **Skill propagation:** Agents with native skill folder support (Claude Code, GitHub Copilot, GitHub Agents, Cursor) get native skill artifacts. Other agents receive inline skill summaries directly in their workspace instruction file, so no agent misses skill guidance.
 
 #### 6. Verify sync
 
@@ -143,18 +145,28 @@ Use this in CI pipelines or pre-commit hooks to enforce alignment.
 
 ### 7. Import external skills (optional)
 
-Import skills from external JSON files (downloaded from npm packages, GitHub repos, or community sources):
+Import skills from JSON, standalone `SKILL.md` files, or full skill directories with `references/`:
 
 ```bash
-# Import a skill from a local file
+# Import a skill from JSON
 node docs/agent-jump-start/scripts/agent-jump-start.mjs import-skill \
   --spec docs/agent-jump-start/canonical-spec.yaml \
   --skill path/to/external-skill.json
 
+# Import a standalone SKILL.md file
+node docs/agent-jump-start/scripts/agent-jump-start.mjs import-skill \
+  --spec docs/agent-jump-start/canonical-spec.yaml \
+  --skill path/to/SKILL.md
+
+# Import a skill package directory
+node docs/agent-jump-start/scripts/agent-jump-start.mjs import-skill \
+  --spec docs/agent-jump-start/canonical-spec.yaml \
+  --skill path/to/skill-directory
+
 # Import and overwrite an existing skill with the same slug
 node docs/agent-jump-start/scripts/agent-jump-start.mjs import-skill \
   --spec docs/agent-jump-start/canonical-spec.yaml \
-  --skill path/to/updated-skill.json \
+  --skill path/to/updated-skill \
   --replace
 ```
 
@@ -164,10 +176,30 @@ The import command accepts:
 - A single skill object (`{ "slug": "...", "rules": [...] }`)
 - A wrapper with a `skill` key (`{ "skill": { ... } }`)
 - A wrapper with a `skills` array (`{ "skills": [ ... ] }`)
+- A standalone `SKILL.md` file with YAML frontmatter
+- A skill directory containing `SKILL.md` and optional `references/*.md`
 
 Duplicate slugs are skipped unless `--replace` is passed.
 
-### 8. Use prompt templates
+### 8. Validate or export portable skills
+
+```bash
+# Validate an external skill package before importing it
+node docs/agent-jump-start/scripts/agent-jump-start.mjs validate-skill \
+  path/to/skill-directory
+
+# Export one spec-defined skill as a standalone package
+node docs/agent-jump-start/scripts/agent-jump-start.mjs export-skill \
+  --spec docs/agent-jump-start/canonical-spec.yaml \
+  --slug react-best-practices \
+  --output exported-skills/react-best-practices
+
+# Export the canonical spec JSON Schema
+node docs/agent-jump-start/scripts/agent-jump-start.mjs export-schema \
+  --output docs/agent-jump-start/canonical-spec.schema.json
+```
+
+### 9. Use prompt templates
 
 Pick a prompt from `docs/agent-jump-start/prompts/` and paste it into any supported agent:
 
@@ -188,6 +220,7 @@ canonical-spec.yaml          (single source of truth)
         +---> CLAUDE.md
         +---> AGENTS.md
         +---> .github/copilot-instructions.md
+        +---> .github/skills/*/
         +---> .cursor/rules/*.mdc
         +---> .windsurfrules
         +---> .clinerules
@@ -204,7 +237,7 @@ canonical-spec.yaml          (single source of truth)
 The canonical spec acts as a **memory injection layer** for all coding assistants:
 
 1. **Rules** defined once in the spec are rendered into each agent's native instruction format
-2. **Skills** (reusable rule sets) are expanded into full guides with categories, quick references, and detailed guidance
+2. **Skills** (reusable rule sets) are rendered as standards-aligned `SKILL.md` packages and mirrored into agent-native locations
 3. **Review checklists** aggregate all rules into a verification document
 4. Every generated file includes a notice pointing back to the canonical spec, discouraging hand-edits
 
@@ -275,6 +308,8 @@ This means whichever assistant you use — Claude, Copilot, Cursor, or any other
 | Cursor MDC format with frontmatter | Native Cursor rules support with `alwaysApply` and `description` |
 | Manifest with file list | Enables stale file detection, cleanup, and CI enforcement |
 | Skills as first-class objects | Reusable across projects; composable via profiles |
+| Standards-aligned `SKILL.md` generation | Portable across Claude, GitHub, and other Agent Skills-compatible clients |
+| Skill references as first-class assets | Supports progressive disclosure and portable multi-file skill packages |
 | Inline skill summaries for non-native agents | Every agent gets skill guidance, even without skill folder support |
 | Spec validation on every command | Catches errors early with readable, numbered diagnostics |
 | `--clean` flag on render | Removes stale files from previous renders when spec evolves |
@@ -331,10 +366,24 @@ node scripts/agent-jump-start.mjs check \
 node scripts/agent-jump-start.mjs validate \
   --spec canonical-spec.yaml
 
+# Validate an external SKILL.md file or skill directory
+node scripts/agent-jump-start.mjs validate-skill \
+  path/to/skill-directory
+
 # Import an external skill into the canonical spec
 node scripts/agent-jump-start.mjs import-skill \
   --spec canonical-spec.yaml \
-  --skill path/to/skill.json [--replace]
+  --skill path/to/skill-directory [--replace]
+
+# Export one skill as a standalone package
+node scripts/agent-jump-start.mjs export-skill \
+  --spec canonical-spec.yaml \
+  --slug react-best-practices \
+  --output ./exported-skills/react-best-practices
+
+# Export the canonical spec JSON Schema
+node scripts/agent-jump-start.mjs export-schema \
+  --output canonical-spec.schema.json
 ```
 
 ## Folder Layout
@@ -346,6 +395,14 @@ agent-jump-start/
   package.json
   scripts/
     agent-jump-start.mjs
+  lib/
+    constants.mjs
+    files.mjs
+    renderers.mjs
+    schema.mjs
+    skills.mjs
+    utils.mjs
+    validation.mjs
   specs/
     base-spec.yaml
     profiles/
@@ -356,6 +413,8 @@ agent-jump-start/
     01-bootstrap-any-agent.md
     02-change-stack-or-guidelines.md
     03-add-or-update-skill.md
+  tests/
+    agent-jump-start.test.mjs
 ```
 
 ## Portability
