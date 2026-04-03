@@ -100,6 +100,8 @@ test("render generates standards-aligned SKILL.md mirrors for native skill clien
     assert.match(agentsSkill, /## When to Use This Skill/);
     assert.match(claudeSkill, /## Detailed Guidance/);
     assert.match(githubSkill, /metadata:/);
+    assert.equal(claudeSkill, agentsSkill);
+    assert.equal(githubSkill, agentsSkill);
     assert.match(legacyGuide, /canonical, Agent Skills-compatible entrypoint/);
     assert.doesNotMatch(copilotInstructions, /## Skills/);
   } finally {
@@ -329,8 +331,13 @@ test("render generates reference files in skill directories", () => {
     // SKILL.md should contain a reference table
     const skillMd = readFileSync(join(tempDir, ".agents/skills/ref-skill/SKILL.md"), "utf8");
     assert.match(skillMd, /## Reference Guide/);
-    assert.match(skillMd, /patterns\.md/);
+    assert.match(skillMd, /`references\/patterns\.md`/);
     assert.match(skillMd, /Design patterns/);
+
+    const claudeSkillMd = readFileSync(join(tempDir, ".claude/skills/ref-skill/SKILL.md"), "utf8");
+    const githubSkillMd = readFileSync(join(tempDir, ".github/skills/ref-skill/SKILL.md"), "utf8");
+    assert.equal(claudeSkillMd, skillMd);
+    assert.equal(githubSkillMd, skillMd);
   } finally {
     cleanupTempDir(tempDir);
   }
