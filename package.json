@@ -1,6 +1,6 @@
 {
   "name": "agent-jump-start",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "Portable starter kit for keeping AI coding assistant instructions synchronized across 9 agent ecosystems from one canonical specification.",
   "type": "module",
   "main": "scripts/agent-jump-start.mjs",
@@ -14,6 +14,8 @@
     "render:clean": "node scripts/agent-jump-start.mjs render --spec canonical-spec.yaml --target . --clean",
     "check": "node scripts/agent-jump-start.mjs check --spec canonical-spec.yaml --target .",
     "validate": "node scripts/agent-jump-start.mjs validate --spec canonical-spec.yaml",
+    "test": "node --test",
+    "export-schema": "node scripts/agent-jump-start.mjs export-schema",
     "list-agents": "node scripts/agent-jump-start.mjs list-agents",
     "list-profiles": "node scripts/agent-jump-start.mjs list-profiles"
   },
