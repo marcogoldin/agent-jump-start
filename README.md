@@ -115,6 +115,7 @@ This generates synchronized instruction files for all 9 supported agents:
 AGENTS.md                                  # GitHub Agents
 CLAUDE.md                                  # Claude Code
 CONVENTIONS.md                             # Aider (with inline skill summaries)
+.agents/AGENTS.md                          # Canonical workspace governance file
 .github/copilot-instructions.md            # GitHub Copilot workspace instructions
 .github/skills/<slug>/SKILL.md             # GitHub Copilot native skill package
 .cursor/rules/agent-instructions.mdc       # Cursor
@@ -131,7 +132,7 @@ docs/agent-review-checklist.md             # Review checklist
 docs/agent-jump-start/generated-manifest.json
 ```
 
-> **Skill propagation:** `.agents/skills/` is the canonical portable skill tree. Claude Code and GitHub Copilot receive synchronized mirrors of those canonical skill packages, Cursor receives projected MDC rules, and other agents receive inline skill summaries in their workspace instruction file.
+> **Canonical governance:** `.agents/AGENTS.md` is the canonical workspace governance file, and `.agents/skills/` is the canonical portable skill tree. Root agent instruction files and native skill mirrors are synchronized from those `.agents/` artifacts.
 
 #### 6. Verify sync
 
@@ -219,6 +220,7 @@ canonical-spec.yaml          (single source of truth)
         |
         +---> CLAUDE.md
         +---> AGENTS.md
+        +---> .agents/AGENTS.md
         +---> .github/copilot-instructions.md
         +---> .github/skills/*/
         +---> .cursor/rules/*.mdc
@@ -236,7 +238,7 @@ canonical-spec.yaml          (single source of truth)
 
 The canonical spec acts as a **memory injection layer** for all coding assistants:
 
-1. **Rules** defined once in the spec are rendered into each agent's native instruction format
+1. **Rules** defined once in the spec are first rendered into canonical `.agents/AGENTS.md`, then mirrored into agent-native workspace instruction files
 2. **Skills** (reusable rule sets) are first rendered into canonical `.agents/skills/<slug>/` packages, then mirrored or projected into agent-native locations
 3. **Review checklists** aggregate all rules into a verification document
 4. Every generated file includes a notice pointing back to the canonical spec, discouraging hand-edits
@@ -307,6 +309,7 @@ This means whichever assistant you use — Claude, Copilot, Cursor, or any other
 | Generated notice in every file | Prevents accidental hand-edits that drift from the spec |
 | Cursor MDC format with frontmatter | Native Cursor rules support with `alwaysApply` and `description` |
 | Manifest with file list | Enables stale file detection, cleanup, and CI enforcement |
+| `.agents/AGENTS.md` as canonical governance | One portable workspace source of truth before agent-specific mirrors |
 | Skills as first-class objects | Reusable across projects; composable via profiles |
 | `.agents/skills/` as canonical output | One portable source of truth before agent-specific mirrors |
 | Standards-aligned `SKILL.md` generation | Portable across Claude, GitHub, and other Agent Skills-compatible clients |
