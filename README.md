@@ -118,6 +118,9 @@ CONVENTIONS.md                             # Aider (with inline skill summaries)
 .agents/AGENTS.md                          # Canonical workspace governance file
 .github/copilot-instructions.md            # GitHub Copilot workspace instructions
 .github/skills/<slug>/SKILL.md             # GitHub Copilot native skill package
+.github/skills/<slug>/references/*.md      # On-demand reference docs (if defined)
+.github/skills/<slug>/scripts/*            # Bundled executable scripts (if defined)
+.github/skills/<slug>/assets/*             # Static resources and templates (if defined)
 .cursor/rules/agent-instructions.mdc       # Cursor
 .cursor/rules/<skill-slug>.mdc             # Cursor (per skill)
 .windsurfrules                             # Windsurf (with inline skill summaries)
@@ -126,8 +129,14 @@ CONVENTIONS.md                             # Aider (with inline skill summaries)
 .continue/rules/agent-instructions.md      # Continue.dev (with inline skill summaries)
 .agents/skills/<slug>/SKILL.md             # GitHub Agents native skill package
 .agents/skills/<slug>/AGENTS.md            # Backward-compatible expanded skill mirror
+.agents/skills/<slug>/references/*.md      # On-demand reference docs (if defined)
+.agents/skills/<slug>/scripts/*            # Bundled executable scripts (if defined)
+.agents/skills/<slug>/assets/*             # Static resources and templates (if defined)
 .claude/skills/<slug>/SKILL.md             # Claude Code native skill package
 .claude/skills/<slug>/AGENTS.md            # Backward-compatible expanded skill mirror
+.claude/skills/<slug>/references/*.md      # On-demand reference docs (if defined)
+.claude/skills/<slug>/scripts/*            # Bundled executable scripts (if defined)
+.claude/skills/<slug>/assets/*             # Static resources and templates (if defined)
 docs/agent-review-checklist.md             # Review checklist
 docs/agent-jump-start/generated-manifest.json
 ```
@@ -146,7 +155,7 @@ Use this in CI pipelines or pre-commit hooks to enforce alignment.
 
 ### 7. Import external skills (optional)
 
-Import skills from JSON, standalone `SKILL.md` files, or full skill directories with `references/`:
+Import skills from JSON, standalone `SKILL.md` files, or full skill directories with `references/`, `scripts/`, and `assets/`:
 
 ```bash
 # Import a skill from JSON
@@ -159,7 +168,7 @@ node docs/agent-jump-start/scripts/agent-jump-start.mjs import-skill \
   --spec docs/agent-jump-start/canonical-spec.yaml \
   --skill path/to/SKILL.md
 
-# Import a skill package directory
+# Import a skill package directory (with references/, scripts/, assets/)
 node docs/agent-jump-start/scripts/agent-jump-start.mjs import-skill \
   --spec docs/agent-jump-start/canonical-spec.yaml \
   --skill path/to/skill-directory
@@ -178,7 +187,7 @@ The import command accepts:
 - A wrapper with a `skill` key (`{ "skill": { ... } }`)
 - A wrapper with a `skills` array (`{ "skills": [ ... ] }`)
 - A standalone `SKILL.md` file with YAML frontmatter
-- A skill directory containing `SKILL.md` and optional `references/*.md`
+- A skill directory containing `SKILL.md` and optional `references/*.md`, `scripts/*`, `assets/*`
 
 Duplicate slugs are skipped unless `--replace` is passed.
 
@@ -190,6 +199,7 @@ node docs/agent-jump-start/scripts/agent-jump-start.mjs validate-skill \
   path/to/skill-directory
 
 # Export one spec-defined skill as a standalone package
+# (includes references/, scripts/, assets/ when present)
 node docs/agent-jump-start/scripts/agent-jump-start.mjs export-skill \
   --spec docs/agent-jump-start/canonical-spec.yaml \
   --slug react-best-practices \
@@ -229,8 +239,8 @@ canonical-spec.yaml          (single source of truth)
         +---> .roo/rules/*.md
         +---> .continue/rules/*.md
         +---> CONVENTIONS.md
-        +---> .agents/skills/*/
-        +---> .claude/skills/*/
+        +---> .agents/skills/*/              (SKILL.md + references/ + scripts/ + assets/)
+        +---> .claude/skills/*/               (mirrored from .agents/skills/)
         +---> docs/agent-review-checklist.md
 ```
 
@@ -292,6 +302,15 @@ This means whichever assistant you use — Claude, Copilot, Cursor, or any other
           "summary": "What the rule means.",
           "guidance": ["How to apply it."]
         }
+      ],
+      "references": [
+        { "name": "patterns.md", "content": "...", "loadWhen": "Design patterns" }
+      ],
+      "scripts": [
+        { "name": "setup.sh", "content": "...", "description": "Run setup" }
+      ],
+      "assets": [
+        { "name": "template.json", "content": "...", "description": "Config template" }
       ]
     }
   ]
@@ -314,6 +333,7 @@ This means whichever assistant you use — Claude, Copilot, Cursor, or any other
 | `.agents/skills/` as canonical output | One portable source of truth before agent-specific mirrors |
 | Standards-aligned `SKILL.md` generation | Portable across Claude, GitHub, and other Agent Skills-compatible clients |
 | Skill references as first-class assets | Supports progressive disclosure and portable multi-file skill packages |
+| Skill scripts and assets support | `scripts/` for executable code, `assets/` for static resources per Agent Skills spec |
 | Inline skill summaries for non-native agents | Every agent gets skill guidance, even without skill folder support |
 | Spec validation on every command | Catches errors early with readable, numbered diagnostics |
 | `--clean` flag on render | Removes stale files from previous renders when spec evolves |
