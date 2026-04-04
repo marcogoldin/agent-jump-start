@@ -845,3 +845,370 @@ Content.
     cleanupTempDir(tempDir);
   }
 });
+
+// ===========================================================================
+// Scripts support tests
+// ===========================================================================
+
+test("validate accepts skills with valid scripts", () => {
+  const tempDir = makeTempDir();
+  try {
+    const specPath = writeSpec(tempDir, makeMinimalSpec({
+      skills: [makeSkillFixture({
+        slug: "with-scripts",
+        scripts: [
+          { name: "setup.sh", content: "#!/bin/bash\necho hello", description: "Setup script" },
+          { name: "lint.py", content: "import sys\nprint('ok')" },
+        ],
+      })],
+    }));
+    expectSuccess(runCli(["validate", "--spec", specPath]));
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("validate rejects scripts with invalid filenames", () => {
+  const tempDir = makeTempDir();
+  try {
+    const specPath = writeSpec(tempDir, makeMinimalSpec({
+      skills: [makeSkillFixture({
+        slug: "bad-script",
+        scripts: [{ name: "../escape.sh", content: "#!/bin/bash" }],
+      })],
+    }));
+    const result = runCli(["validate", "--spec", specPath]);
+    expectFailure(result);
+    assert.match(result.stderr, /valid filename/);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("render generates script files in skill directories", () => {
+  const tempDir = makeTempDir();
+  try {
+    const specPath = writeSpec(tempDir, makeMinimalSpec({
+      skills: [makeSkillFixture({
+        slug: "script-skill",
+        scripts: [
+          { name: "setup.sh", content: "#!/bin/bash\necho setup", description: "Run setup" },
+        ],
+      })],
+    }));
+    expectSuccess(runCli(["render", "--spec", specPath, "--target", tempDir]));
+
+    // Scripts should appear in all three skill directories
+    for (const dir of [".agents", ".claude", ".github"]) {
+      const scriptPath = join(tempDir, `${dir}/skills/script-skill/scripts/setup.sh`);
+      assert.ok(existsSync(scriptPath), `${dir} script should exist`);
+      const scriptContent = readFileSync(scriptPath, "utf8");
+      assert.match(scriptContent, /echo setup/);
+    }
+
+    // SKILL.md should contain a scripts table
+    const skillMd = readFileSync(join(tempDir, ".agents/skills/script-skill/SKILL.md"), "utf8");
+    assert.match(skillMd, /## Bundled Scripts/);
+    assert.match(skillMd, /`scripts\/setup\.sh`/);
+
+    // Mirrors should be identical
+    const claudeSkillMd = readFileSync(join(tempDir, ".claude/skills/script-skill/SKILL.md"), "utf8");
+    const githubSkillMd = readFileSync(join(tempDir, ".github/skills/script-skill/SKILL.md"), "utf8");
+    assert.equal(claudeSkillMd, skillMd);
+    assert.equal(githubSkillMd, skillMd);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("check passes for skills with scripts after render", () => {
+  const tempDir = makeTempDir();
+  try {
+    const specPath = writeSpec(tempDir, makeMinimalSpec({
+      skills: [makeSkillFixture({
+        slug: "check-scripts",
+        scripts: [{ name: "run.sh", content: "#!/bin/bash\nexit 0" }],
+      })],
+    }));
+    expectSuccess(runCli(["render", "--spec", specPath, "--target", tempDir]));
+    expectSuccess(runCli(["check", "--spec", specPath, "--target", tempDir]));
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+// ===========================================================================
+// Assets support tests
+// ===========================================================================
+
+test("validate accepts skills with valid assets", () => {
+  const tempDir = makeTempDir();
+  try {
+    const specPath = writeSpec(tempDir, makeMinimalSpec({
+      skills: [makeSkillFixture({
+        slug: "with-assets",
+        assets: [
+          { name: "template.json", content: '{"key": "value"}', description: "Config template" },
+          { name: "schema.xsd", content: "<xs:schema />" },
+        ],
+      })],
+    }));
+    expectSuccess(runCli(["validate", "--spec", specPath]));
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("validate rejects assets with invalid filenames", () => {
+  const tempDir = makeTempDir();
+  try {
+    const specPath = writeSpec(tempDir, makeMinimalSpec({
+      skills: [makeSkillFixture({
+        slug: "bad-asset",
+        assets: [{ name: "../escape.json", content: "{}" }],
+      })],
+    }));
+    const result = runCli(["validate", "--spec", specPath]);
+    expectFailure(result);
+    assert.match(result.stderr, /valid filename/);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("render generates asset files in skill directories", () => {
+  const tempDir = makeTempDir();
+  try {
+    const specPath = writeSpec(tempDir, makeMinimalSpec({
+      skills: [makeSkillFixture({
+        slug: "asset-skill",
+        assets: [
+          { name: "template.json", content: '{"key": "value"}', description: "Config template" },
+        ],
+      })],
+    }));
+    expectSuccess(runCli(["render", "--spec", specPath, "--target", tempDir]));
+
+    // Assets should appear in all three skill directories
+    for (const dir of [".agents", ".claude", ".github"]) {
+      const assetPath = join(tempDir, `${dir}/skills/asset-skill/assets/template.json`);
+      assert.ok(existsSync(assetPath), `${dir} asset should exist`);
+      const assetContent = readFileSync(assetPath, "utf8");
+      assert.match(assetContent, /"key"/);
+    }
+
+    // SKILL.md should contain an assets table
+    const skillMd = readFileSync(join(tempDir, ".agents/skills/asset-skill/SKILL.md"), "utf8");
+    assert.match(skillMd, /## Assets/);
+    assert.match(skillMd, /`assets\/template\.json`/);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("check passes for skills with assets after render", () => {
+  const tempDir = makeTempDir();
+  try {
+    const specPath = writeSpec(tempDir, makeMinimalSpec({
+      skills: [makeSkillFixture({
+        slug: "check-assets",
+        assets: [{ name: "config.yaml", content: "key: value" }],
+      })],
+    }));
+    expectSuccess(runCli(["render", "--spec", specPath, "--target", tempDir]));
+    expectSuccess(runCli(["check", "--spec", specPath, "--target", tempDir]));
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+// ===========================================================================
+// Combined progressive disclosure (references + scripts + assets)
+// ===========================================================================
+
+test("render generates full progressive disclosure package with references, scripts, and assets", () => {
+  const tempDir = makeTempDir();
+  try {
+    const specPath = writeSpec(tempDir, makeMinimalSpec({
+      skills: [makeSkillFixture({
+        slug: "full-package",
+        references: [{ name: "guide.md", content: "# Guide\nGuide content.", loadWhen: "Need guidance" }],
+        scripts: [{ name: "setup.sh", content: "#!/bin/bash\necho setup", description: "Run setup" }],
+        assets: [{ name: "template.json", content: '{"tmpl": true}', description: "Template file" }],
+      })],
+    }));
+    expectSuccess(runCli(["render", "--spec", specPath, "--target", tempDir]));
+    expectSuccess(runCli(["check", "--spec", specPath, "--target", tempDir]));
+
+    // Verify all three resource types in canonical package
+    const base = join(tempDir, ".agents/skills/full-package");
+    assert.ok(existsSync(join(base, "references/guide.md")));
+    assert.ok(existsSync(join(base, "scripts/setup.sh")));
+    assert.ok(existsSync(join(base, "assets/template.json")));
+
+    // SKILL.md should contain all three tables
+    const skillMd = readFileSync(join(base, "SKILL.md"), "utf8");
+    assert.match(skillMd, /## Reference Guide/);
+    assert.match(skillMd, /## Bundled Scripts/);
+    assert.match(skillMd, /## Assets/);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+// ===========================================================================
+// Import scripts/assets from directory
+// ===========================================================================
+
+test("import-skill reads a directory with scripts and assets", () => {
+  const tempDir = makeTempDir();
+  try {
+    const skillDir = join(tempDir, "external-full");
+    mkdirSync(join(skillDir, "references"), { recursive: true });
+    mkdirSync(join(skillDir, "scripts"), { recursive: true });
+    mkdirSync(join(skillDir, "assets"), { recursive: true });
+    writeFileSync(join(skillDir, "SKILL.md"), `---
+name: full-import
+description: A skill with all resource types.
+metadata:
+  version: "2.0.0"
+---
+
+# Full Import
+
+A skill with all resource types.
+
+## When to Use This Skill
+
+- Testing full package import
+`, "utf8");
+    writeFileSync(join(skillDir, "references", "api.md"), "# API\nAPI docs.", "utf8");
+    writeFileSync(join(skillDir, "scripts", "validate.sh"), "#!/bin/bash\necho ok", "utf8");
+    writeFileSync(join(skillDir, "assets", "config.json"), '{"setting": true}', "utf8");
+
+    const specPath = join(tempDir, "spec.yaml");
+    expectSuccess(runCli(["bootstrap", "--base", "specs/base-spec.yaml", "--output", specPath]));
+    expectSuccess(runCli(["import-skill", "--spec", specPath, "--skill", skillDir]));
+
+    const spec = JSON.parse(readFileSync(specPath, "utf8"));
+    assert.equal(spec.skills.length, 1);
+    const skill = spec.skills[0];
+    assert.equal(skill.slug, "full-import");
+    assert.ok(skill.references?.length >= 1);
+    assert.equal(skill.references[0].name, "api.md");
+    assert.ok(skill.scripts?.length >= 1);
+    assert.equal(skill.scripts[0].name, "validate.sh");
+    assert.match(skill.scripts[0].content, /echo ok/);
+    assert.ok(skill.assets?.length >= 1);
+    assert.equal(skill.assets[0].name, "config.json");
+    assert.match(skill.assets[0].content, /setting/);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+// ===========================================================================
+// Export scripts/assets
+// ===========================================================================
+
+test("export-skill includes scripts and assets when present", () => {
+  const tempDir = makeTempDir();
+  try {
+    const specPath = writeSpec(tempDir, makeMinimalSpec({
+      skills: [makeSkillFixture({
+        slug: "export-full",
+        references: [{ name: "ref.md", content: "# Ref\nContent." }],
+        scripts: [{ name: "build.sh", content: "#!/bin/bash\nmake build", description: "Build script" }],
+        assets: [{ name: "defaults.json", content: '{"default": true}', description: "Default config" }],
+      })],
+    }));
+
+    const outputDir = join(tempDir, "exported");
+    expectSuccess(runCli(["export-skill", "--spec", specPath, "--slug", "export-full", "--output", outputDir]));
+
+    assert.ok(existsSync(join(outputDir, "SKILL.md")));
+    assert.ok(existsSync(join(outputDir, "references/ref.md")));
+    assert.ok(existsSync(join(outputDir, "scripts/build.sh")));
+    assert.ok(existsSync(join(outputDir, "assets/defaults.json")));
+
+    const buildSh = readFileSync(join(outputDir, "scripts/build.sh"), "utf8");
+    assert.match(buildSh, /make build/);
+
+    const defaults = readFileSync(join(outputDir, "assets/defaults.json"), "utf8");
+    assert.match(defaults, /default/);
+
+    // Exported SKILL.md should include scripts and assets tables
+    const skillMd = readFileSync(join(outputDir, "SKILL.md"), "utf8");
+    assert.match(skillMd, /## Bundled Scripts/);
+    assert.match(skillMd, /## Assets/);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+// ===========================================================================
+// Export -> re-import round-trip with scripts/assets
+// ===========================================================================
+
+test("export -> re-import round-trip preserves scripts and assets", () => {
+  const tempDir = makeTempDir();
+  try {
+    const originalSkill = makeSkillFixture({
+      slug: "roundtrip-full",
+      title: "Roundtrip Full",
+      description: "Test full round-trip.",
+      author: "Tester",
+      license: "MIT",
+      references: [{ name: "ref.md", content: "# Ref\nRef content." }],
+      scripts: [{ name: "setup.py", content: "print('setup')", description: "Setup script" }],
+      assets: [{ name: "schema.json", content: '{"type": "object"}', description: "JSON Schema" }],
+    });
+    const specPath = writeSpec(tempDir, makeMinimalSpec({ skills: [originalSkill] }));
+
+    // Export
+    const exportDir = join(tempDir, "exported");
+    expectSuccess(runCli(["export-skill", "--spec", specPath, "--slug", "roundtrip-full", "--output", exportDir]));
+
+    // Re-import into a fresh spec
+    const newSpecPath = join(tempDir, "new-spec.yaml");
+    expectSuccess(runCli(["bootstrap", "--base", "specs/base-spec.yaml", "--output", newSpecPath]));
+    expectSuccess(runCli(["import-skill", "--spec", newSpecPath, "--skill", exportDir]));
+
+    const newSpec = JSON.parse(readFileSync(newSpecPath, "utf8"));
+    assert.equal(newSpec.skills.length, 1);
+    const reimported = newSpec.skills[0];
+    assert.equal(reimported.slug, "roundtrip-full");
+    assert.ok(reimported.references?.length >= 1);
+    assert.ok(reimported.scripts?.length >= 1);
+    assert.equal(reimported.scripts[0].name, "setup.py");
+    assert.match(reimported.scripts[0].content, /print\('setup'\)/);
+    assert.ok(reimported.assets?.length >= 1);
+    assert.equal(reimported.assets[0].name, "schema.json");
+    assert.match(reimported.assets[0].content, /type/);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+// ===========================================================================
+// Schema includes scripts and assets definitions
+// ===========================================================================
+
+test("export-schema includes skillScript and skillAsset definitions", () => {
+  const tempDir = makeTempDir();
+  try {
+    const schemaPath = join(tempDir, "schema.json");
+    expectSuccess(runCli(["export-schema", "--output", schemaPath]));
+
+    const schema = JSON.parse(readFileSync(schemaPath, "utf8"));
+    assert.ok(schema.$defs?.skillScript, "Schema should define skillScript type");
+    assert.ok(schema.$defs?.skillAsset, "Schema should define skillAsset type");
+
+    // Verify skill properties include scripts and assets
+    const skillProps = schema.$defs.skill.properties;
+    assert.ok(skillProps.scripts, "Skill should have scripts property in schema");
+    assert.ok(skillProps.assets, "Skill should have assets property in schema");
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
