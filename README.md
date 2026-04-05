@@ -28,21 +28,57 @@ Agent Jump Start solves this with one canonical YAML/JSON spec that feeds a zero
 
 > **Other assistants** such as Amazon Q Developer, JetBrains AI Assistant, and Sourcegraph Cody can also benefit by reading `AGENTS.md` or `CONVENTIONS.md` when their native instruction formats become standardized.
 
+## What's New in v1.8.0
+
+### External Skill Fidelity
+
+Importing external community skills (e.g., from `anthropics/skills` or `claude-skills`) now preserves the original author's semantic intent instead of flattening everything into a generic structure.
+
+**Before v1.8.0:** all imported sections were collapsed into a single "General" category with synthetic `gen-N` rule IDs. Prohibition constraints like "do not skip type annotations" lost their negative semantics.
+
+**After v1.8.0:**
+
+| Feature | Before | After |
+|---|---|---|
+| Section structure | Flattened to 1 category | Each section becomes its own category |
+| Prohibition detection | None | `must not`, `never`, `avoid`, `do not` auto-tagged |
+| Rule IDs | Synthetic `gen-1`, `gen-2`... | Semantic prefixes: `con-6`, `bp-2`, `cwf-1` |
+| Prose sections | Lost | Preserved as rule guidance |
+| Section ordering | Lost | Maintained via priority numbers |
+| Rendered output | Generic rules | `[PROHIBITION]`, `[WORKFLOW]`, `[EXAMPLE]` tags |
+| Round-trip fidelity | Lossy | Stable through import → export → re-import |
+
+### Semantic Rule Tags
+
+Rules now support an optional `semantic` field: `"directive"`, `"prohibition"`, `"workflow"`, `"example"`, `"reference"`. These are auto-detected on import and preserved through rendering and export.
+
+### Mirror Sync Integrity
+
+- Canonical `.agents/skills/` packages and `.claude/skills/` / `.github/skills/` mirrors are verified byte-identical
+- References, scripts, and assets are synced across all three mirror locations
+- 60 automated tests (up from 46) cover fidelity, sync, and round-trip scenarios
+
 ## Prerequisites
 
 - **Node.js** (v18 or later) to run the included generator script.
 - No npm packages or external dependencies required.
 - If Node.js is not desired as a helper runtime, reimplement the script in any language while keeping the same spec format and output layout.
 
-## Quick Start
+## Complete Workflow: From Zero to Synchronized Agents
 
-### Option A: One-command init (recommended)
+This section walks you through the entire workflow from start to finish, including importing external skills and understanding how synchronization works.
+
+### Step 1: Initialize the framework
+
+Pick the approach that fits your project.
+
+**Option A — One-command init (recommended):**
 
 ```bash
 npx agent-jump-start init --profile specs/profiles/react-vite-mui.profile.yaml --target .
 ```
 
-This single command copies the framework, bootstraps the canonical spec with your chosen profile, validates the spec, and renders all instruction files. You're ready to customize.
+This copies the framework into `docs/agent-jump-start/`, bootstraps a canonical spec with your chosen profile, validates it, and renders all instruction files in one step.
 
 Run without `--profile` to see available profiles:
 
@@ -50,48 +86,22 @@ Run without `--profile` to see available profiles:
 npx agent-jump-start init --target .
 ```
 
-### Option B: Step-by-step setup
-
-#### 1. Copy into your project
-
-Copy the `agent-jump-start` folder into your target repository:
+**Option B — Step-by-step setup:**
 
 ```bash
-cp -r agent-jump-start /path/to/your-project/docs/agent-jump-start
-```
+# Clone the toolkit
+git clone https://github.com/marcogoldin/agent-jump-start.git docs/agent-jump-start
 
-Or clone directly:
-
-```bash
-git clone https://github.com/YOUR_USERNAME/agent-jump-start.git docs/agent-jump-start
-```
-
-#### 2. Choose a starting profile
-
-Available example profiles (list with `node scripts/agent-jump-start.mjs list-profiles`):
-
-| Profile | Stack |
-|---|---|
-| `specs/profiles/react-vite-mui.profile.yaml` | React + Vite + Material UI |
-| `specs/profiles/php-laravel.profile.yaml` | PHP 8.3 + Laravel |
-| `specs/profiles/c-cpp.profile.yaml` | C/C++ with CMake, sanitizers, memory safety |
-
-If neither fits, duplicate one and adjust it, or skip the profile and customize the base spec directly.
-
-#### 3. Bootstrap the canonical spec
-
-```bash
+# Bootstrap the canonical spec (combine base + profile)
 node docs/agent-jump-start/scripts/agent-jump-start.mjs bootstrap \
   --base docs/agent-jump-start/specs/base-spec.yaml \
   --profile docs/agent-jump-start/specs/profiles/react-vite-mui.profile.yaml \
   --output docs/agent-jump-start/canonical-spec.yaml
 ```
 
-This creates `docs/agent-jump-start/canonical-spec.yaml` — your **single source of truth**.
+### Step 2: Customize the canonical spec
 
-#### 4. Customize the canonical spec
-
-Edit `canonical-spec.yaml` with your real:
+Edit `docs/agent-jump-start/canonical-spec.yaml` with your real project details:
 
 - Project name and components
 - Tech stack and runtime versions
@@ -99,7 +109,7 @@ Edit `canonical-spec.yaml` with your real:
 - Validation commands (lint, test, build)
 - Skills and rule sets
 
-#### 5. Render all instruction files
+### Step 3: Render all instruction files
 
 ```bash
 node docs/agent-jump-start/scripts/agent-jump-start.mjs render \
@@ -107,43 +117,44 @@ node docs/agent-jump-start/scripts/agent-jump-start.mjs render \
   --target . --clean
 ```
 
-The `--clean` flag removes stale files from previous renders (e.g., skills you removed from the spec).
-
-This generates synchronized instruction files for all 9 supported agents:
+This single command generates synchronized instruction files for **all 9 agents simultaneously**:
 
 ```
-AGENTS.md                                  # GitHub Agents
-CLAUDE.md                                  # Claude Code
-CONVENTIONS.md                             # Aider (with inline skill summaries)
-.agents/AGENTS.md                          # Canonical workspace governance file
-.github/copilot-instructions.md            # GitHub Copilot workspace instructions
-.github/skills/<slug>/SKILL.md             # GitHub Copilot native skill package
-.github/skills/<slug>/references/*.md      # On-demand reference docs (if defined)
-.github/skills/<slug>/scripts/*            # Bundled executable scripts (if defined)
-.github/skills/<slug>/assets/*             # Static resources and templates (if defined)
-.cursor/rules/agent-instructions.mdc       # Cursor
-.cursor/rules/<skill-slug>.mdc             # Cursor (per skill)
-.windsurfrules                             # Windsurf (with inline skill summaries)
-.clinerules                                # Cline (with inline skill summaries)
-.roo/rules/agent-instructions.md           # Roo Code (with inline skill summaries)
-.continue/rules/agent-instructions.md      # Continue.dev (with inline skill summaries)
-.agents/skills/<slug>/SKILL.md             # GitHub Agents native skill package
-.agents/skills/<slug>/AGENTS.md            # Backward-compatible expanded skill mirror
-.agents/skills/<slug>/references/*.md      # On-demand reference docs (if defined)
-.agents/skills/<slug>/scripts/*            # Bundled executable scripts (if defined)
-.agents/skills/<slug>/assets/*             # Static resources and templates (if defined)
-.claude/skills/<slug>/SKILL.md             # Claude Code native skill package
-.claude/skills/<slug>/AGENTS.md            # Backward-compatible expanded skill mirror
-.claude/skills/<slug>/references/*.md      # On-demand reference docs (if defined)
-.claude/skills/<slug>/scripts/*            # Bundled executable scripts (if defined)
-.claude/skills/<slug>/assets/*             # Static resources and templates (if defined)
-docs/agent-review-checklist.md             # Review checklist
+.agents/AGENTS.md                          # Canonical workspace governance (source of truth)
+.agents/skills/<slug>/SKILL.md             # Canonical skill packages
+.agents/skills/<slug>/AGENTS.md            # Backward-compatible expanded mirror
+.agents/skills/<slug>/references/*.md      # On-demand reference docs
+.agents/skills/<slug>/scripts/*            # Bundled executable scripts
+.agents/skills/<slug>/assets/*             # Static resources and templates
+AGENTS.md                                  # GitHub Agents (mirror of .agents/AGENTS.md)
+CLAUDE.md                                  # Claude Code (mirror of .agents/AGENTS.md)
+.claude/skills/<slug>/SKILL.md             # Claude native skill (mirror of .agents/skills/)
+.github/copilot-instructions.md            # GitHub Copilot (mirror of .agents/AGENTS.md)
+.github/skills/<slug>/SKILL.md             # Copilot native skill (mirror of .agents/skills/)
+.cursor/rules/agent-instructions.mdc       # Cursor workspace rules
+.cursor/rules/<slug>.mdc                   # Cursor per-skill rules
+.windsurfrules                             # Windsurf (mirror + inline skills)
+.clinerules                                # Cline (mirror + inline skills)
+.roo/rules/agent-instructions.md           # Roo Code (mirror + inline skills)
+.continue/rules/agent-instructions.md      # Continue.dev (mirror + inline skills)
+CONVENTIONS.md                             # Aider (mirror + inline skills)
+docs/agent-review-checklist.md             # Aggregated review checklist
 docs/agent-jump-start/generated-manifest.json
 ```
 
-> **Canonical governance:** `.agents/AGENTS.md` is the canonical workspace governance file, and `.agents/skills/` is the canonical portable skill tree. Root agent instruction files and native skill mirrors are synchronized from those `.agents/` artifacts.
+**How synchronization works:**
 
-#### 6. Verify sync
+1. The generator reads your single canonical spec
+2. `.agents/AGENTS.md` is generated as the **canonical workspace governance file** (no mirror notice)
+3. Root files (`AGENTS.md`, `CLAUDE.md`, `.github/copilot-instructions.md`) are generated as **mirrors** that reference the canonical source
+4. Agents without native skill folders (Windsurf, Cline, Roo Code, Continue.dev, Aider) receive the workspace instructions **plus inline skill summaries**
+5. Each skill defined in the spec is rendered as a canonical `.agents/skills/<slug>/` package, then **byte-identical mirrors** are generated at `.claude/skills/<slug>/` and `.github/skills/<slug>/`
+6. Cursor gets its own MDC-format files with native frontmatter
+7. A manifest tracks every generated file for stale detection
+
+The `--clean` flag removes files from previous renders that are no longer in the spec (e.g., skills you deleted).
+
+### Step 4: Verify sync
 
 ```bash
 node docs/agent-jump-start/scripts/agent-jump-start.mjs check \
@@ -151,66 +162,95 @@ node docs/agent-jump-start/scripts/agent-jump-start.mjs check \
   --target .
 ```
 
-Use this in CI pipelines or pre-commit hooks to enforce alignment.
+This compares every generated file against what the spec would produce. If anything has drifted (hand-edits, stale files, missing files), it exits with code `1` and reports the mismatches.
 
-### 7. Import external skills (optional)
+Use this in **CI pipelines** or **pre-commit hooks** to enforce alignment.
 
-Import skills from JSON, standalone `SKILL.md` files, or full skill directories with `references/`, `scripts/`, and `assets/`:
+### Step 5: Import external skills
+
+This is where Agent Jump Start becomes an interoperability layer for the broader AI skills ecosystem.
+
+**Import a community skill package:**
 
 ```bash
-# Import a skill from JSON
+# Import a skill directory (e.g., from anthropics/skills or claude-skills)
 node docs/agent-jump-start/scripts/agent-jump-start.mjs import-skill \
   --spec docs/agent-jump-start/canonical-spec.yaml \
-  --skill path/to/external-skill.json
+  --skill path/to/python-pro
 
 # Import a standalone SKILL.md file
 node docs/agent-jump-start/scripts/agent-jump-start.mjs import-skill \
   --spec docs/agent-jump-start/canonical-spec.yaml \
   --skill path/to/SKILL.md
 
-# Import a skill package directory (with references/, scripts/, assets/)
+# Import from a JSON skill file
 node docs/agent-jump-start/scripts/agent-jump-start.mjs import-skill \
   --spec docs/agent-jump-start/canonical-spec.yaml \
-  --skill path/to/skill-directory
+  --skill path/to/skill.json
 
-# Import and overwrite an existing skill with the same slug
+# Overwrite an existing skill with the same slug
 node docs/agent-jump-start/scripts/agent-jump-start.mjs import-skill \
   --spec docs/agent-jump-start/canonical-spec.yaml \
-  --skill path/to/updated-skill \
-  --replace
+  --skill path/to/updated-skill --replace
 ```
 
-After importing, run `render` + `check` to propagate the new skill to all 9 agent targets.
+**What happens during import (v1.8.0+):**
 
-The import command accepts:
-- A single skill object (`{ "slug": "...", "rules": [...] }`)
-- A wrapper with a `skill` key (`{ "skill": { ... } }`)
-- A wrapper with a `skills` array (`{ "skills": [ ... ] }`)
-- A standalone `SKILL.md` file with YAML frontmatter
-- A skill directory containing `SKILL.md` and optional `references/*.md`, `scripts/*`, `assets/*`
+1. The importer reads the external `SKILL.md` frontmatter and body
+2. Each H2 section (`## Best Practices`, `## Constraints`, etc.) becomes its own **category** with a semantic prefix
+3. Bullet points within each section become individual **rules**
+4. Prohibition language (`must not`, `never`, `avoid`, `do not`) is automatically detected and rules are tagged with `semantic: "prohibition"`
+5. Prose-only sections (like `## Core Workflow`) are preserved as rules with the original text in the `guidance` array
+6. References (`references/*.md`), scripts (`scripts/*`), and assets (`assets/*`) are collected and stored in the spec
+7. Metadata (author, version, triggers, license) is preserved from the frontmatter
 
-Duplicate slugs are skipped unless `--replace` is passed.
+**After import, re-render and verify:**
 
-### 8. Validate or export portable skills
+```bash
+node docs/agent-jump-start/scripts/agent-jump-start.mjs render \
+  --spec docs/agent-jump-start/canonical-spec.yaml \
+  --target . --clean
+
+node docs/agent-jump-start/scripts/agent-jump-start.mjs check \
+  --spec docs/agent-jump-start/canonical-spec.yaml \
+  --target .
+```
+
+The imported skill is now automatically synchronized across all 9 agent ecosystems.
+
+### Step 6: Validate and export skills
 
 ```bash
 # Validate an external skill package before importing it
 node docs/agent-jump-start/scripts/agent-jump-start.mjs validate-skill \
   path/to/skill-directory
 
-# Export one spec-defined skill as a standalone package
-# (includes references/, scripts/, assets/ when present)
+# Export one skill as a standalone portable package
 node docs/agent-jump-start/scripts/agent-jump-start.mjs export-skill \
   --spec docs/agent-jump-start/canonical-spec.yaml \
-  --slug react-best-practices \
-  --output exported-skills/react-best-practices
+  --slug python-pro \
+  --output exported-skills/python-pro
 
 # Export the canonical spec JSON Schema
 node docs/agent-jump-start/scripts/agent-jump-start.mjs export-schema \
   --output docs/agent-jump-start/canonical-spec.schema.json
 ```
 
-### 9. Use prompt templates
+Exported skill packages are standards-aligned SKILL.md directories that can be shared with other teams or imported into other Agent Jump Start projects.
+
+### Step 7: Commit and maintain
+
+```bash
+# Commit both the spec and all generated files together
+git add docs/agent-jump-start/canonical-spec.yaml .agents/ .claude/ .github/ \
+  AGENTS.md CLAUDE.md CONVENTIONS.md .cursor/ .windsurfrules .clinerules \
+  .roo/ .continue/ docs/agent-review-checklist.md
+git commit -m "sync: update agent instructions from canonical spec"
+```
+
+When project rules change, repeat the cycle: **edit spec → render → check → commit**.
+
+### Step 8: Use prompt templates (optional)
 
 Pick a prompt from `docs/agent-jump-start/prompts/` and paste it into any supported agent:
 
@@ -228,19 +268,21 @@ canonical-spec.yaml          (single source of truth)
         v
  agent-jump-start.mjs        (zero-dependency generator)
         |
-        +---> CLAUDE.md
-        +---> AGENTS.md
-        +---> .agents/AGENTS.md
-        +---> .github/copilot-instructions.md
-        +---> .github/skills/*/
-        +---> .cursor/rules/*.mdc
-        +---> .windsurfrules
-        +---> .clinerules
-        +---> .roo/rules/*.md
-        +---> .continue/rules/*.md
-        +---> CONVENTIONS.md
-        +---> .agents/skills/*/              (SKILL.md + references/ + scripts/ + assets/)
-        +---> .claude/skills/*/               (mirrored from .agents/skills/)
+        +---> .agents/AGENTS.md              (canonical governance)
+        +---> .agents/skills/*/              (canonical skill packages)
+        |       SKILL.md + references/ + scripts/ + assets/
+        |
+        +---> CLAUDE.md                      (mirror)
+        +---> .claude/skills/*/              (byte-identical mirror)
+        +---> AGENTS.md                      (mirror)
+        +---> .github/copilot-instructions.md (mirror)
+        +---> .github/skills/*/              (byte-identical mirror)
+        +---> .cursor/rules/*.mdc            (Cursor native format)
+        +---> .windsurfrules                 (mirror + inline skills)
+        +---> .clinerules                    (mirror + inline skills)
+        +---> .roo/rules/*.md                (mirror + inline skills)
+        +---> .continue/rules/*.md           (mirror + inline skills)
+        +---> CONVENTIONS.md                 (mirror + inline skills)
         +---> docs/agent-review-checklist.md
 ```
 
@@ -249,9 +291,10 @@ canonical-spec.yaml          (single source of truth)
 The canonical spec acts as a **memory injection layer** for all coding assistants:
 
 1. **Rules** defined once in the spec are first rendered into canonical `.agents/AGENTS.md`, then mirrored into agent-native workspace instruction files
-2. **Skills** (reusable rule sets) are first rendered into canonical `.agents/skills/<slug>/` packages, then mirrored or projected into agent-native locations
-3. **Review checklists** aggregate all rules into a verification document
-4. Every generated file includes a notice pointing back to the canonical spec, discouraging hand-edits
+2. **Skills** (reusable rule sets) are first rendered into canonical `.agents/skills/<slug>/` packages, then byte-identical mirrors are generated for `.claude/skills/` and `.github/skills/`
+3. **Prohibition semantics** are preserved: rules tagged with `semantic: "prohibition"` are rendered with `[PROHIBITION]` markers and `MUST NOT` blockquotes
+4. **Review checklists** aggregate all rules into a verification document
+5. Every generated file includes a notice pointing back to the canonical spec, discouraging hand-edits
 
 This means whichever assistant you use — Claude, Copilot, Cursor, or any other — it reads the same rules, follows the same conventions, and produces consistent output.
 
@@ -284,23 +327,31 @@ This means whichever assistant you use — Claude, Copilot, Cursor, or any other
   "skills": [
     {
       "slug": "skill-name",
-      "name": "skill-name",
       "title": "Skill Title",
       "description": "What this skill covers.",
       "version": "1.0.0",
       "author": "Your Team",
       "appliesWhen": ["Writing React components"],
       "categories": [
-        { "priority": 1, "name": "Category", "impact": "HIGH", "prefix": "cat-" }
+        { "priority": 1, "name": "Best Practices", "impact": "HIGH", "prefix": "bp-" },
+        { "priority": 2, "name": "Constraints", "impact": "CRITICAL", "prefix": "con-" }
       ],
       "rules": [
         {
-          "id": "cat-rule-name",
-          "category": "Category",
-          "title": "Rule Title",
+          "id": "bp-1",
+          "category": "Best Practices",
+          "title": "Use type annotations",
           "impact": "HIGH",
-          "summary": "What the rule means.",
-          "guidance": ["How to apply it."]
+          "summary": "Always use type annotations on public APIs.",
+          "guidance": ["Apply to all function signatures and class attributes."]
+        },
+        {
+          "id": "con-2",
+          "category": "Constraints",
+          "title": "No mutable defaults",
+          "impact": "CRITICAL",
+          "summary": "Never use mutable default arguments.",
+          "semantic": "prohibition"
         }
       ],
       "references": [
@@ -319,6 +370,20 @@ This means whichever assistant you use — Claude, Copilot, Cursor, or any other
 
 > The spec uses a strict YAML 1.2 subset that is also valid JSON, allowing zero-dependency parsing with `JSON.parse`. To use richer YAML syntax, swap in a dedicated YAML parser.
 
+### Semantic Rule Tags
+
+Rules support an optional `semantic` field that classifies the rule's intent:
+
+| Tag | Meaning | Rendering |
+|---|---|---|
+| `directive` | Standard guidance | Normal rendering |
+| `prohibition` | Something that must NOT be done | `[PROHIBITION]` tag, `MUST NOT` blockquote |
+| `workflow` | Ordered process or pipeline | `[WORKFLOW]` tag |
+| `example` | Code example or template | `[EXAMPLE]` tag |
+| `reference` | Points to external knowledge | Normal rendering |
+
+These tags are **auto-detected during import** from section headings and rule text patterns. You can also set them manually in your spec.
+
 ## Design Choices
 
 | Choice | Rationale |
@@ -329,11 +394,14 @@ This means whichever assistant you use — Claude, Copilot, Cursor, or any other
 | Cursor MDC format with frontmatter | Native Cursor rules support with `alwaysApply` and `description` |
 | Manifest with file list | Enables stale file detection, cleanup, and CI enforcement |
 | `.agents/AGENTS.md` as canonical governance | One portable workspace source of truth before agent-specific mirrors |
-| Skills as first-class objects | Reusable across projects; composable via profiles |
 | `.agents/skills/` as canonical output | One portable source of truth before agent-specific mirrors |
+| Skills as first-class objects | Reusable across projects; composable via profiles |
 | Standards-aligned `SKILL.md` generation | Portable across Claude, GitHub, and other Agent Skills-compatible clients |
-| Skill references as first-class assets | Supports progressive disclosure and portable multi-file skill packages |
-| Skill scripts and assets support | `scripts/` for executable code, `assets/` for static resources per Agent Skills spec |
+| Section-preserving import | External skills keep their original structure, not flattened to "General" |
+| Prohibition auto-detection | Negative constraints are tagged and rendered distinctly |
+| Semantic rule tags | Rules carry intent metadata through import/export/render cycles |
+| Byte-identical mirrors | `.claude/skills/` and `.github/skills/` are exact copies of `.agents/skills/` |
+| Progressive disclosure resources | `references/`, `scripts/`, `assets/` per Agent Skills specification |
 | Inline skill summaries for non-native agents | Every agent gets skill guidance, even without skill folder support |
 | Spec validation on every command | Catches errors early with readable, numbered diagnostics |
 | `--clean` flag on render | Removes stale files from previous renders when spec evolves |
@@ -343,7 +411,7 @@ This means whichever assistant you use — Claude, Copilot, Cursor, or any other
 When project rules change:
 
 1. Edit `canonical-spec.yaml`
-2. Run `render`
+2. Run `render --clean`
 3. Run `check`
 4. Commit both the spec and the regenerated files together
 
@@ -410,6 +478,24 @@ node scripts/agent-jump-start.mjs export-schema \
   --output canonical-spec.schema.json
 ```
 
+## Testing
+
+Run the full test suite:
+
+```bash
+npm test
+```
+
+The test suite covers 60 scenarios including:
+
+- Core workflow: render → check round-trips, init with and without profiles
+- Canonical governance: `.agents/AGENTS.md` generation, mirror notices, inline skill summaries
+- Validation: malformed specs, invalid slugs, duplicate IDs, empty fields, semantic tags
+- Skills: import (JSON, SKILL.md, directory), export, round-trips
+- Progressive disclosure: references, scripts, assets rendering and sync
+- **External skill fidelity**: section preservation, prohibition detection, prose preservation
+- **Mirror sync integrity**: byte-parity between canonical and mirrors, reference sync
+
 ## Folder Layout
 
 ```
@@ -457,7 +543,7 @@ If Node.js is not desired, you can:
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/my-improvement`)
 3. Add or update profiles, skills, or generator features
-4. Test with `node scripts/agent-jump-start.mjs check`
+4. Run the test suite: `npm test`
 5. Submit a pull request
 
 ### Adding a New Profile

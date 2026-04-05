@@ -1212,3 +1212,486 @@ test("export-schema includes skillScript and skillAsset definitions", () => {
     cleanupTempDir(tempDir);
   }
 });
+
+// ===========================================================================
+// External Skill Fidelity Tests (Priority 1)
+// ===========================================================================
+
+// Helper: creates a realistic python-pro style SKILL.md fixture
+function writePythonProFixture(dir) {
+  mkdirSync(join(dir, "references"), { recursive: true });
+  writeFileSync(join(dir, "SKILL.md"), `---
+name: python-pro
+description: Expert Python development practices for production-grade code.
+license: MIT
+metadata:
+  author: Community Author
+  version: "2.0.0"
+  triggers: python, py, typing, mypy
+  role: Python expert
+  scope: language
+---
+
+# Python Pro
+
+Expert Python development practices for production-grade code.
+
+## When to Use This Skill
+
+- Writing new Python modules or packages
+- Reviewing Python pull requests
+- Refactoring existing Python codebases
+
+## Core Workflow
+
+Follow the standard development cycle for Python projects.
+Always start with type stubs before implementing logic.
+Run mypy and pytest before committing any changes.
+
+## Best Practices
+
+- Use type annotations on all public function signatures
+- Prefer dataclasses or attrs over plain dicts for structured data
+- Use pathlib instead of os.path for file system operations
+- Write docstrings for all public modules, classes, and functions
+
+## Constraints
+
+- Do not skip type annotations on public APIs
+- Never use mutable default arguments in function signatures
+- Do not ignore mypy errors with type: ignore without a documented reason
+- Avoid bare except clauses — always catch specific exceptions
+- Must not use global mutable state for configuration
+
+## Output Templates
+
+- Module files must include a module-level docstring
+- Test files must follow the test_<module>_<behavior> naming convention
+
+## Code Examples
+
+Use context managers for resource management.
+Prefer f-strings over format() or % formatting.
+
+## Knowledge Reference
+
+Refer to the bundled reference files for detailed type system guidance and async patterns.
+`, "utf8");
+  writeFileSync(join(dir, "references", "type-system.md"), "# Type System\n\nDetailed guidance on Python typing module usage.", "utf8");
+  writeFileSync(join(dir, "references", "async-patterns.md"), "# Async Patterns\n\nBest practices for asyncio and concurrent code.", "utf8");
+}
+
+// Helper: creates a react-hooks style SKILL.md fixture
+function writeReactHooksFixture(dir) {
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "SKILL.md"), `---
+name: react-hooks-guide
+description: React hooks best practices and common pitfalls.
+metadata:
+  version: "1.0.0"
+  triggers: react, hooks, useState, useEffect
+---
+
+# React Hooks Guide
+
+React hooks best practices and common pitfalls.
+
+## When to Use This Skill
+
+- Creating or modifying React functional components
+- Using useState, useEffect, useCallback, useMemo
+
+## Rules
+
+- Always declare dependencies in useEffect dependency arrays
+- Use useCallback for event handlers passed to child components
+- Prefer useReducer over useState for complex state logic
+
+## Pitfalls to Avoid
+
+- Do not call hooks inside loops, conditions, or nested functions
+- Never update state directly during render — always use effects or event handlers
+- Avoid creating new object references on every render as props
+`, "utf8");
+}
+
+// Helper: creates a minimal skill with only prose sections
+function writeProseOnlyFixture(dir) {
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "SKILL.md"), `---
+name: architecture-guide
+description: High-level architectural guidance for the project.
+metadata:
+  version: "1.0.0"
+---
+
+# Architecture Guide
+
+High-level architectural guidance for the project.
+
+## When to Use This Skill
+
+- Making architectural decisions
+- Planning new features
+
+## Design Philosophy
+
+The system follows a layered architecture where each layer communicates only with the layer directly below it. Side effects are isolated at the boundary and the core logic remains pure.
+
+## Error Handling Strategy
+
+All errors are caught at service boundaries and converted to typed result objects. No exceptions are allowed to propagate across module boundaries.
+`, "utf8");
+}
+
+test("import preserves section structure as separate categories (python-pro fixture)", () => {
+  const tempDir = makeTempDir();
+  try {
+    const skillDir = join(tempDir, "python-pro");
+    writePythonProFixture(skillDir);
+
+    const specPath = join(tempDir, "spec.yaml");
+    expectSuccess(runCli(["bootstrap", "--base", "specs/base-spec.yaml", "--output", specPath]));
+    expectSuccess(runCli(["import-skill", "--spec", specPath, "--skill", skillDir]));
+
+    const spec = JSON.parse(readFileSync(specPath, "utf8"));
+    const skill = spec.skills[0];
+
+    // Should have multiple categories, NOT a single "General"
+    assert.ok(skill.categories.length > 1, `Expected multiple categories, got ${skill.categories.length}`);
+    const categoryNames = skill.categories.map((c) => c.name);
+    assert.ok(!categoryNames.includes("General"), "Should NOT flatten to a single General category");
+
+    // Core sections should be preserved as categories
+    assert.ok(categoryNames.includes("Best Practices"), "Best Practices section should become a category");
+    assert.ok(categoryNames.includes("Constraints"), "Constraints section should become a category");
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("import detects and tags prohibition rules from Constraints section", () => {
+  const tempDir = makeTempDir();
+  try {
+    const skillDir = join(tempDir, "python-pro");
+    writePythonProFixture(skillDir);
+
+    const specPath = join(tempDir, "spec.yaml");
+    expectSuccess(runCli(["bootstrap", "--base", "specs/base-spec.yaml", "--output", specPath]));
+    expectSuccess(runCli(["import-skill", "--spec", specPath, "--skill", skillDir]));
+
+    const spec = JSON.parse(readFileSync(specPath, "utf8"));
+    const skill = spec.skills[0];
+
+    // Rules from Constraints should have semantic: "prohibition"
+    const constraintRules = skill.rules.filter((r) => r.category === "Constraints");
+    assert.ok(constraintRules.length >= 4, `Expected at least 4 constraint rules, got ${constraintRules.length}`);
+
+    const prohibitionRules = constraintRules.filter((r) => r.semantic === "prohibition");
+    assert.ok(prohibitionRules.length >= 4, `Expected at least 4 prohibition-tagged rules, got ${prohibitionRules.length}`);
+
+    // Check specific prohibitions are preserved
+    const summaries = prohibitionRules.map((r) => r.summary);
+    assert.ok(summaries.some((s) => /type annotations/i.test(s)), "Should preserve type annotation prohibition");
+    assert.ok(summaries.some((s) => /mutable default/i.test(s)), "Should preserve mutable default prohibition");
+    assert.ok(summaries.some((s) => /mypy/i.test(s)), "Should preserve mypy prohibition");
+    assert.ok(summaries.some((s) => /bare except/i.test(s)), "Should preserve bare except prohibition");
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("import preserves prohibition semantics for rules with negative language", () => {
+  const tempDir = makeTempDir();
+  try {
+    const skillDir = join(tempDir, "react-hooks");
+    writeReactHooksFixture(skillDir);
+
+    const specPath = join(tempDir, "spec.yaml");
+    expectSuccess(runCli(["bootstrap", "--base", "specs/base-spec.yaml", "--output", specPath]));
+    expectSuccess(runCli(["import-skill", "--spec", specPath, "--skill", skillDir]));
+
+    const spec = JSON.parse(readFileSync(specPath, "utf8"));
+    const skill = spec.skills[0];
+
+    // "Pitfalls to Avoid" rules should detect prohibition language
+    const pitfallRules = skill.rules.filter((r) => r.category === "Pitfalls to Avoid");
+    assert.ok(pitfallRules.length >= 3, "Should extract pitfall rules");
+    const prohibitions = pitfallRules.filter((r) => r.semantic === "prohibition");
+    assert.ok(prohibitions.length >= 2, `Expected at least 2 prohibition rules in Pitfalls, got ${prohibitions.length}`);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("import preserves prose-only sections as workflow/reference rules with guidance", () => {
+  const tempDir = makeTempDir();
+  try {
+    const skillDir = join(tempDir, "arch-guide");
+    writeProseOnlyFixture(skillDir);
+
+    const specPath = join(tempDir, "spec.yaml");
+    expectSuccess(runCli(["bootstrap", "--base", "specs/base-spec.yaml", "--output", specPath]));
+    expectSuccess(runCli(["import-skill", "--spec", specPath, "--skill", skillDir]));
+
+    const spec = JSON.parse(readFileSync(specPath, "utf8"));
+    const skill = spec.skills[0];
+
+    // Prose-only sections should still produce categories
+    const categoryNames = skill.categories.map((c) => c.name);
+    assert.ok(categoryNames.includes("Design Philosophy"), "Design Philosophy should become a category");
+    assert.ok(categoryNames.includes("Error Handling Strategy"), "Error Handling Strategy should become a category");
+
+    // Prose should be preserved as guidance on rules
+    const designRules = skill.rules.filter((r) => r.category === "Design Philosophy");
+    assert.ok(designRules.length >= 1, "Design Philosophy should have at least one rule");
+    assert.ok(designRules[0].guidance?.length > 0, "Prose section should have guidance preserved");
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("import preserves references from external skill directories", () => {
+  const tempDir = makeTempDir();
+  try {
+    const skillDir = join(tempDir, "python-pro");
+    writePythonProFixture(skillDir);
+
+    const specPath = join(tempDir, "spec.yaml");
+    expectSuccess(runCli(["bootstrap", "--base", "specs/base-spec.yaml", "--output", specPath]));
+    expectSuccess(runCli(["import-skill", "--spec", specPath, "--skill", skillDir]));
+
+    const spec = JSON.parse(readFileSync(specPath, "utf8"));
+    const skill = spec.skills[0];
+
+    assert.ok(skill.references?.length >= 2, "Should import both reference files");
+    const refNames = skill.references.map((r) => r.name);
+    assert.ok(refNames.includes("async-patterns.md"), "Should import async-patterns.md");
+    assert.ok(refNames.includes("type-system.md"), "Should import type-system.md");
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("import -> render -> check round-trip preserves fidelity (python-pro)", () => {
+  const tempDir = makeTempDir();
+  try {
+    const skillDir = join(tempDir, "python-pro");
+    writePythonProFixture(skillDir);
+
+    const specPath = join(tempDir, "spec.yaml");
+    expectSuccess(runCli(["bootstrap", "--base", "specs/base-spec.yaml", "--output", specPath]));
+    expectSuccess(runCli(["import-skill", "--spec", specPath, "--skill", skillDir]));
+
+    const renderDir = join(tempDir, "rendered");
+    mkdirSync(renderDir);
+    expectSuccess(runCli(["render", "--spec", specPath, "--target", renderDir]));
+    expectSuccess(runCli(["check", "--spec", specPath, "--target", renderDir]));
+
+    // Rendered SKILL.md should contain prohibition markers
+    const skillMd = readFileSync(join(renderDir, ".agents/skills/python-pro/SKILL.md"), "utf8");
+    assert.match(skillMd, /MUST NOT/, "Rendered SKILL.md should contain MUST NOT markers for prohibitions");
+    assert.match(skillMd, /Constraints/, "Rendered SKILL.md should preserve Constraints section heading");
+    assert.match(skillMd, /Best Practices/, "Rendered SKILL.md should preserve Best Practices heading");
+
+    // References should be rendered
+    assert.ok(existsSync(join(renderDir, ".agents/skills/python-pro/references/type-system.md")));
+    assert.ok(existsSync(join(renderDir, ".agents/skills/python-pro/references/async-patterns.md")));
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("import -> export -> re-import round-trip preserves section structure", () => {
+  const tempDir = makeTempDir();
+  try {
+    const skillDir = join(tempDir, "python-pro");
+    writePythonProFixture(skillDir);
+
+    // Import
+    const specPath = join(tempDir, "spec.yaml");
+    expectSuccess(runCli(["bootstrap", "--base", "specs/base-spec.yaml", "--output", specPath]));
+    expectSuccess(runCli(["import-skill", "--spec", specPath, "--skill", skillDir]));
+
+    const spec = JSON.parse(readFileSync(specPath, "utf8"));
+    const originalCategories = spec.skills[0].categories.map((c) => c.name);
+    const originalProhibitionCount = spec.skills[0].rules.filter((r) => r.semantic === "prohibition").length;
+
+    // Export
+    const exportDir = join(tempDir, "exported");
+    expectSuccess(runCli(["export-skill", "--spec", specPath, "--slug", "python-pro", "--output", exportDir]));
+
+    // Re-import
+    const newSpecPath = join(tempDir, "new-spec.yaml");
+    expectSuccess(runCli(["bootstrap", "--base", "specs/base-spec.yaml", "--output", newSpecPath]));
+    expectSuccess(runCli(["import-skill", "--spec", newSpecPath, "--skill", exportDir]));
+
+    const newSpec = JSON.parse(readFileSync(newSpecPath, "utf8"));
+    const reimported = newSpec.skills[0];
+
+    // Section structure should be preserved through round-trip
+    const reimportedCategories = reimported.categories.map((c) => c.name);
+    assert.ok(reimportedCategories.length >= originalCategories.length - 1,
+      `Round-trip should preserve most categories. Original: ${originalCategories.length}, Got: ${reimportedCategories.length}`);
+
+    // Prohibition semantics should survive round-trip
+    const reimportedProhibitions = reimported.rules.filter((r) => r.semantic === "prohibition").length;
+    assert.ok(reimportedProhibitions >= originalProhibitionCount - 1,
+      `Round-trip should preserve most prohibitions. Original: ${originalProhibitionCount}, Got: ${reimportedProhibitions}`);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+// ===========================================================================
+// Mirror Semantic Synchronization Tests
+// ===========================================================================
+
+test("canonical and mirror SKILL.md are byte-identical for imported skills", () => {
+  const tempDir = makeTempDir();
+  try {
+    const skillDir = join(tempDir, "python-pro");
+    writePythonProFixture(skillDir);
+
+    const specPath = join(tempDir, "spec.yaml");
+    expectSuccess(runCli(["bootstrap", "--base", "specs/base-spec.yaml", "--output", specPath]));
+    expectSuccess(runCli(["import-skill", "--spec", specPath, "--skill", skillDir]));
+
+    const renderDir = join(tempDir, "rendered");
+    mkdirSync(renderDir);
+    expectSuccess(runCli(["render", "--spec", specPath, "--target", renderDir]));
+
+    const canonical = readFileSync(join(renderDir, ".agents/skills/python-pro/SKILL.md"), "utf8");
+    const claude = readFileSync(join(renderDir, ".claude/skills/python-pro/SKILL.md"), "utf8");
+    const github = readFileSync(join(renderDir, ".github/skills/python-pro/SKILL.md"), "utf8");
+
+    assert.equal(claude, canonical, ".claude mirror should be byte-identical to canonical");
+    assert.equal(github, canonical, ".github mirror should be byte-identical to canonical");
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("mirror references are byte-identical to canonical for imported skills", () => {
+  const tempDir = makeTempDir();
+  try {
+    const skillDir = join(tempDir, "python-pro");
+    writePythonProFixture(skillDir);
+
+    const specPath = join(tempDir, "spec.yaml");
+    expectSuccess(runCli(["bootstrap", "--base", "specs/base-spec.yaml", "--output", specPath]));
+    expectSuccess(runCli(["import-skill", "--spec", specPath, "--skill", skillDir]));
+
+    const renderDir = join(tempDir, "rendered");
+    mkdirSync(renderDir);
+    expectSuccess(runCli(["render", "--spec", specPath, "--target", renderDir]));
+
+    for (const refFile of ["type-system.md", "async-patterns.md"]) {
+      const canonical = readFileSync(join(renderDir, `.agents/skills/python-pro/references/${refFile}`), "utf8");
+      const claude = readFileSync(join(renderDir, `.claude/skills/python-pro/references/${refFile}`), "utf8");
+      const github = readFileSync(join(renderDir, `.github/skills/python-pro/references/${refFile}`), "utf8");
+      assert.equal(claude, canonical, `.claude references/${refFile} should match canonical`);
+      assert.equal(github, canonical, `.github references/${refFile} should match canonical`);
+    }
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("non-native agents receive prohibition semantics in inline skill summaries", () => {
+  const tempDir = makeTempDir();
+  try {
+    const skillDir = join(tempDir, "python-pro");
+    writePythonProFixture(skillDir);
+
+    const specPath = join(tempDir, "spec.yaml");
+    expectSuccess(runCli(["bootstrap", "--base", "specs/base-spec.yaml", "--output", specPath]));
+    expectSuccess(runCli(["import-skill", "--spec", specPath, "--skill", skillDir]));
+
+    const renderDir = join(tempDir, "rendered");
+    mkdirSync(renderDir);
+    expectSuccess(runCli(["render", "--spec", specPath, "--target", renderDir]));
+
+    // Non-native agents (e.g., Windsurf, Cline) should include skill summaries
+    const windsurf = readFileSync(join(renderDir, ".windsurfrules"), "utf8");
+    assert.match(windsurf, /Python Pro/, "Windsurf should include Python Pro skill summary");
+    assert.match(windsurf, /Constraints/, "Windsurf should include Constraints category");
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("rendered SKILL.md preserves section headings as category names in detailed guidance", () => {
+  const tempDir = makeTempDir();
+  try {
+    const skillDir = join(tempDir, "react-hooks");
+    writeReactHooksFixture(skillDir);
+
+    const specPath = join(tempDir, "spec.yaml");
+    expectSuccess(runCli(["bootstrap", "--base", "specs/base-spec.yaml", "--output", specPath]));
+    expectSuccess(runCli(["import-skill", "--spec", specPath, "--skill", skillDir]));
+
+    const renderDir = join(tempDir, "rendered");
+    mkdirSync(renderDir);
+    expectSuccess(runCli(["render", "--spec", specPath, "--target", renderDir]));
+
+    const skillMd = readFileSync(join(renderDir, ".agents/skills/react-hooks-guide/SKILL.md"), "utf8");
+    assert.match(skillMd, /### Rules/, "Should have Rules section");
+    assert.match(skillMd, /### Pitfalls to Avoid/, "Should have Pitfalls to Avoid section");
+    assert.match(skillMd, /\[PROHIBITION\]/, "Should tag prohibition rules");
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("schema includes semantic field on rule definitions", () => {
+  const tempDir = makeTempDir();
+  try {
+    const schemaPath = join(tempDir, "schema.json");
+    expectSuccess(runCli(["export-schema", "--output", schemaPath]));
+
+    const schema = JSON.parse(readFileSync(schemaPath, "utf8"));
+    const ruleProps = schema.$defs.skill.properties.rules.items.properties;
+    assert.ok(ruleProps.semantic, "Rule should have semantic property in schema");
+    assert.deepEqual(ruleProps.semantic.enum, ["directive", "prohibition", "workflow", "example", "reference"]);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("validate accepts skills with semantic tags on rules", () => {
+  const tempDir = makeTempDir();
+  try {
+    const specPath = writeSpec(tempDir, makeMinimalSpec({
+      skills: [makeSkillFixture({
+        slug: "semantic-test",
+        rules: [
+          { id: "gen-1", category: "General", title: "Do this", impact: "HIGH", summary: "A directive.", semantic: "directive" },
+          { id: "gen-2", category: "General", title: "Never do that", impact: "CRITICAL", summary: "A prohibition.", semantic: "prohibition" },
+        ],
+      })],
+    }));
+    expectSuccess(runCli(["validate", "--spec", specPath]));
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("validate rejects invalid semantic tag", () => {
+  const tempDir = makeTempDir();
+  try {
+    const specPath = writeSpec(tempDir, makeMinimalSpec({
+      skills: [makeSkillFixture({
+        slug: "bad-semantic",
+        rules: [
+          { id: "gen-1", category: "General", title: "Rule", impact: "HIGH", summary: "Rule.", semantic: "unknown-type" },
+        ],
+      })],
+    }));
+    const result = runCli(["validate", "--spec", specPath]);
+    expectFailure(result);
+    assert.match(result.stderr, /semantic must be one of/);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
