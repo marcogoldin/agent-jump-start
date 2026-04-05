@@ -1695,3 +1695,193 @@ test("validate rejects invalid semantic tag", () => {
     cleanupTempDir(tempDir);
   }
 });
+
+// ===========================================================================
+// Mixed Constraint Fidelity Tests (prohibition vs positive directive)
+// ===========================================================================
+
+test("import does NOT tag positive directives in Constraints section as prohibition", () => {
+  const tempDir = makeTempDir();
+  try {
+    const skillDir = join(tempDir, "mixed-constraints");
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(join(skillDir, "SKILL.md"), `---
+name: mixed-constraints
+description: Skill with mixed positive and negative constraints.
+metadata:
+  version: "1.0.0"
+---
+
+# Mixed Constraints
+
+Skill with mixed positive and negative constraints.
+
+## When to Use This Skill
+
+- Testing constraint classification
+
+## Constraints
+
+- Must use type annotations on all public APIs
+- Must include docstrings on all exported functions
+- Do not skip type annotations on internal helpers
+- Never use mutable default arguments
+- Always validate input at service boundaries
+- Avoid bare except clauses
+`, "utf8");
+
+    const specPath = join(tempDir, "spec.yaml");
+    expectSuccess(runCli(["bootstrap", "--base", "specs/base-spec.yaml", "--output", specPath]));
+    expectSuccess(runCli(["import-skill", "--spec", specPath, "--skill", skillDir]));
+
+    const spec = JSON.parse(readFileSync(specPath, "utf8"));
+    const skill = spec.skills[0];
+    const constraintRules = skill.rules.filter((r) => r.category === "Constraints");
+
+    // Positive directives should NOT be tagged as prohibition
+    const mustUse = constraintRules.find((r) => /Must use type annotations/.test(r.summary));
+    assert.ok(mustUse, "Should find 'Must use type annotations' rule");
+    assert.notEqual(mustUse.semantic, "prohibition", "'Must use X' is a positive directive, not a prohibition");
+
+    const mustInclude = constraintRules.find((r) => /Must include docstrings/.test(r.summary));
+    assert.ok(mustInclude, "Should find 'Must include docstrings' rule");
+    assert.notEqual(mustInclude.semantic, "prohibition", "'Must include X' is a positive directive, not a prohibition");
+
+    const alwaysValidate = constraintRules.find((r) => /Always validate/.test(r.summary));
+    assert.ok(alwaysValidate, "Should find 'Always validate' rule");
+    assert.notEqual(alwaysValidate.semantic, "prohibition", "'Always X' is a positive directive, not a prohibition");
+
+    // Negative constraints SHOULD be tagged as prohibition
+    const doNotSkip = constraintRules.find((r) => /Do not skip/.test(r.summary));
+    assert.ok(doNotSkip, "Should find 'Do not skip' rule");
+    assert.equal(doNotSkip.semantic, "prohibition", "'Do not skip X' should be tagged as prohibition");
+
+    const neverUse = constraintRules.find((r) => /Never use mutable/.test(r.summary));
+    assert.ok(neverUse, "Should find 'Never use mutable' rule");
+    assert.equal(neverUse.semantic, "prohibition", "'Never use X' should be tagged as prohibition");
+
+    const avoidBare = constraintRules.find((r) => /Avoid bare except/.test(r.summary));
+    assert.ok(avoidBare, "Should find 'Avoid bare except' rule");
+    assert.equal(avoidBare.semantic, "prohibition", "'Avoid X' should be tagged as prohibition");
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("render does NOT emit MUST NOT for positive directives in mixed sections", () => {
+  const tempDir = makeTempDir();
+  try {
+    const skillDir = join(tempDir, "mixed-render");
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(join(skillDir, "SKILL.md"), `---
+name: mixed-render
+description: Render fidelity for mixed constraints.
+metadata:
+  version: "1.0.0"
+---
+
+# Mixed Render
+
+Render fidelity for mixed constraints.
+
+## When to Use This Skill
+
+- Testing render output
+
+## Constraints
+
+- Must use strict mode in all modules
+- Do not use eval or Function constructor
+- Always prefer const over let
+- Never reassign function parameters
+`, "utf8");
+
+    const specPath = join(tempDir, "spec.yaml");
+    expectSuccess(runCli(["bootstrap", "--base", "specs/base-spec.yaml", "--output", specPath]));
+    expectSuccess(runCli(["import-skill", "--spec", specPath, "--skill", skillDir]));
+
+    const renderDir = join(tempDir, "rendered");
+    mkdirSync(renderDir);
+    expectSuccess(runCli(["render", "--spec", specPath, "--target", renderDir]));
+
+    const skillMd = readFileSync(join(renderDir, ".agents/skills/mixed-render/SKILL.md"), "utf8");
+
+    // "Must use strict mode" should NOT have MUST NOT or [PROHIBITION]
+    assert.doesNotMatch(skillMd, /MUST NOT.*strict mode/i, "Positive directive should not get MUST NOT marker");
+
+    // "Always prefer const" should NOT have MUST NOT or [PROHIBITION]
+    assert.doesNotMatch(skillMd, /MUST NOT.*prefer const/i, "Positive directive should not get MUST NOT marker");
+
+    // "Do not use eval" SHOULD have [PROHIBITION]
+    assert.match(skillMd, /\[PROHIBITION\].*Do not use eval|Do not use eval.*\[PROHIBITION\]/i,
+      "Negative constraint should have PROHIBITION tag");
+
+    // "Never reassign" SHOULD have [PROHIBITION]
+    assert.match(skillMd, /\[PROHIBITION\].*Never reassign|Never reassign.*\[PROHIBITION\]/i,
+      "Negative constraint should have PROHIBITION tag");
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("import -> export -> re-import preserves correct prohibition vs directive split", () => {
+  const tempDir = makeTempDir();
+  try {
+    const skillDir = join(tempDir, "mixed-roundtrip");
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(join(skillDir, "SKILL.md"), `---
+name: mixed-roundtrip
+description: Round-trip fidelity for mixed constraints.
+metadata:
+  version: "1.0.0"
+---
+
+# Mixed Roundtrip
+
+Round-trip fidelity for mixed constraints.
+
+## When to Use This Skill
+
+- Round-trip testing
+
+## Constraints
+
+- Must use TypeScript for all new modules
+- Do not use any type without justification
+- Always run tsc --noEmit before committing
+- Never commit generated files
+`, "utf8");
+
+    // Import
+    const specPath = join(tempDir, "spec.yaml");
+    expectSuccess(runCli(["bootstrap", "--base", "specs/base-spec.yaml", "--output", specPath]));
+    expectSuccess(runCli(["import-skill", "--spec", specPath, "--skill", skillDir]));
+
+    const spec = JSON.parse(readFileSync(specPath, "utf8"));
+    const originalRules = spec.skills[0].rules.filter((r) => r.category === "Constraints");
+    const originalProhibitions = originalRules.filter((r) => r.semantic === "prohibition").map((r) => r.summary);
+    const originalDirectives = originalRules.filter((r) => !r.semantic).map((r) => r.summary);
+
+    // Export
+    const exportDir = join(tempDir, "exported");
+    expectSuccess(runCli(["export-skill", "--spec", specPath, "--slug", "mixed-roundtrip", "--output", exportDir]));
+
+    // Re-import
+    const newSpecPath = join(tempDir, "new-spec.yaml");
+    expectSuccess(runCli(["bootstrap", "--base", "specs/base-spec.yaml", "--output", newSpecPath]));
+    expectSuccess(runCli(["import-skill", "--spec", newSpecPath, "--skill", exportDir]));
+
+    const newSpec = JSON.parse(readFileSync(newSpecPath, "utf8"));
+    const reimportedRules = newSpec.skills[0].rules.filter((r) => r.category === "Constraints");
+    const reimportedProhibitions = reimportedRules.filter((r) => r.semantic === "prohibition").map((r) => r.summary);
+    const reimportedDirectives = reimportedRules.filter((r) => !r.semantic).map((r) => r.summary);
+
+    // Same number of prohibitions and directives after round-trip
+    assert.equal(reimportedProhibitions.length, originalProhibitions.length,
+      `Prohibition count should survive round-trip. Original: ${originalProhibitions.length}, Got: ${reimportedProhibitions.length}`);
+    assert.equal(reimportedDirectives.length, originalDirectives.length,
+      `Directive count should survive round-trip. Original: ${originalDirectives.length}, Got: ${reimportedDirectives.length}`);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
