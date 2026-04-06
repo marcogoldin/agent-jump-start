@@ -39,7 +39,7 @@ Options:
   --version   Show version number
 
 Examples:
-  npx agent-jump-start init \\
+  npx @marcogoldin/agent-jump-start init \\
     --profile specs/profiles/react-vite-mui.profile.yaml
 
   node scripts/agent-jump-start.mjs bootstrap \\

@@ -1,5 +1,5 @@
 {
-  "name": "agent-jump-start",
+  "name": "@marcogoldin/agent-jump-start",
   "version": "1.8.1",
   "description": "Portable starter kit for keeping AI coding assistant instructions synchronized across 9 agent ecosystems from one canonical specification.",
   "type": "module",
@@ -39,8 +39,19 @@
   "license": "MPL-2.0",
   "repository": {
     "type": "git",
-    "url": "https://github.com/marcogoldin/agent-jump-start.git"
+    "url": "git+https://github.com/marcogoldin/agent-jump-start.git"
   },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "scripts/",
+    "lib/",
+    "specs/",
+    "prompts/",
+    "LICENSE",
+    "README.md"
+  ],
   "engines": {
     "node": ">=18.0.0"
   }

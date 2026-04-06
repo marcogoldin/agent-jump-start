@@ -1,21 +1,10 @@
 # Agent Jump Start
 
-Agent Jump Start keeps AI coding assistant instructions synchronized across 9 agent ecosystems from one canonical spec.
+Portable starter kit that keeps AI coding assistant instructions synchronized across 9 agent ecosystems from one canonical specification.
 
-You define project rules, review guidance, and reusable skills once. The generator renders the right files for each supported agent and gives you a `check` command to catch drift in CI.
+Define project rules, review guidance, and reusable skills once. The generator renders the right instruction files for every supported agent and provides a `check` command to catch drift in CI.
 
-## What It Does
-
-From one canonical spec, Agent Jump Start generates:
-
-- canonical workspace governance in `.agents/AGENTS.md`
-- canonical portable skill packages in `.agents/skills/<slug>/`
-- native skill mirrors for `.claude/skills/` and `.github/skills/`
-- agent-specific instruction files for Cursor, Windsurf, Cline, Roo Code, Continue.dev, and Aider
-- a generated review checklist
-- a manifest for stale-file cleanup and drift detection
-
-The project is zero-dependency at runtime. It uses only Node.js built-ins.
+Zero runtime dependencies — uses only Node.js built-ins.
 
 ## Supported Agents
 
@@ -31,108 +20,107 @@ The project is zero-dependency at runtime. It uses only Node.js built-ins.
 | Continue.dev | `.continue/rules/agent-instructions.md` |
 | Aider | `CONVENTIONS.md` |
 
-Notes:
-
 - `.agents/AGENTS.md` is the canonical workspace instruction file.
 - `.agents/skills/` is the canonical skill package tree.
-- `.claude/skills/` and `.github/skills/` are byte-identical mirrors of the canonical skill packages.
+- `.claude/skills/` and `.github/skills/` are byte-identical mirrors of the canonical packages.
 - Agents without native skill-package support receive mirrored workspace instructions plus inline skill summaries.
 
 ## Requirements
 
-- Node.js `>= 18`
-- no npm dependencies required after install
+- Node.js >= 18
+- No npm dependencies required
 
-## Recommended Setup
+## Installation
 
-### Option A: One-command setup
-
-Use this when you want the framework copied into your project automatically.
+### npm
 
 ```bash
-npx agent-jump-start init --target .
+npm install -g @marcogoldin/agent-jump-start
 ```
 
-To start from a built-in profile:
+### yarn
 
 ```bash
-npx agent-jump-start init \
+yarn global add @marcogoldin/agent-jump-start
+```
+
+### npx (no install)
+
+Run any command directly without installing:
+
+```bash
+npx @marcogoldin/agent-jump-start <command> [options]
+```
+
+### Clone from GitHub
+
+Use this when you want the full toolkit vendored into your repository:
+
+```bash
+git clone https://github.com/marcogoldin/agent-jump-start.git docs/agent-jump-start
+```
+
+Then run commands with `node docs/agent-jump-start/scripts/agent-jump-start.mjs` instead of `agent-jump-start`.
+
+## Quick Start
+
+Initialize a project with one command:
+
+```bash
+# With global install
+agent-jump-start init --target .
+
+# With npx
+npx @marcogoldin/agent-jump-start init --target .
+
+# With a built-in stack profile
+npx @marcogoldin/agent-jump-start init \
   --profile specs/profiles/react-vite-mui.profile.yaml \
   --target .
 ```
 
 This creates:
 
-- `docs/agent-jump-start/`
-- `docs/agent-jump-start/canonical-spec.yaml`
-- all generated instruction files for the supported agents
+- `docs/agent-jump-start/canonical-spec.yaml` — your canonical specification
+- `docs/agent-jump-start/` — framework files (scripts, lib, specs, prompts)
+- All generated instruction files for the 9 supported agents
 
-### Option B: Vendor the repository into your project
+## Workflow
 
-Use this when you want the toolkit stored in your repository explicitly.
+### 1. Edit the canonical spec
+
+Open `docs/agent-jump-start/canonical-spec.yaml` and fill in:
+
+- Project name and summary
+- Repository components
+- Workspace rules
+- Validation commands
+- Review checklist
+- Skills (optional)
+
+The spec uses a strict YAML subset that is also valid JSON and can be parsed with `JSON.parse`, keeping the generator zero-dependency.
+
+### 2. Render all outputs
 
 ```bash
-git clone https://github.com/marcogoldin/agent-jump-start.git docs/agent-jump-start
-```
-
-Then bootstrap and render:
-
-```bash
-node docs/agent-jump-start/scripts/agent-jump-start.mjs bootstrap \
-  --base docs/agent-jump-start/specs/base-spec.yaml \
-  --output docs/agent-jump-start/canonical-spec.yaml
-
-node docs/agent-jump-start/scripts/agent-jump-start.mjs render \
+agent-jump-start render \
   --spec docs/agent-jump-start/canonical-spec.yaml \
   --target . --clean
 ```
 
-## Step-by-Step Workflow
+Use `--clean` to remove stale generated files when the spec changes.
 
-### 1. Initialize
-
-Pick one of the setup options above.
-
-### 2. Edit the canonical spec
-
-Open:
-
-`docs/agent-jump-start/canonical-spec.yaml`
-
-Fill in:
-
-- project name and summary
-- repository components
-- workspace rules
-- validation commands
-- review checklist
-- optional skills
-
-The spec is written as a strict YAML subset that is also valid JSON. It can be parsed with `JSON.parse`, which keeps the generator zero-dependency.
-
-### 3. Render all outputs
+### 3. Verify synchronization
 
 ```bash
-node docs/agent-jump-start/scripts/agent-jump-start.mjs render \
-  --spec docs/agent-jump-start/canonical-spec.yaml \
-  --target . --clean
-```
-
-Use `--clean` whenever the spec changed and you want stale generated files removed.
-
-### 4. Verify synchronization
-
-```bash
-node docs/agent-jump-start/scripts/agent-jump-start.mjs check \
+agent-jump-start check \
   --spec docs/agent-jump-start/canonical-spec.yaml \
   --target .
 ```
 
-`check` exits with code `1` when generated files drift from the spec.
+Exits with code `1` when generated files drift from the spec. Use this in CI.
 
-### 5. Commit the spec and generated files together
-
-Typical flow:
+### 4. Commit
 
 ```bash
 git add docs/agent-jump-start/canonical-spec.yaml \
@@ -143,83 +131,85 @@ git add docs/agent-jump-start/canonical-spec.yaml \
 git commit -m "sync: update agent instructions from canonical spec"
 ```
 
-## External Skill Import
+## Skill Packages
 
-Agent Jump Start can import external `SKILL.md` packages into the canonical spec, then synchronize them across the supported outputs.
+Agent Jump Start supports portable skill packages that define reusable instruction sets. Skills are imported into the canonical spec, then synchronized across all agent outputs.
 
-### Supported import sources
+### Skill structure
 
-- a skill directory such as `path/to/python-pro/`
-- an installed skill package such as `.agents/skills/python-pro/` or `~/.agents/skills/python-pro/`
-- a standalone `SKILL.md`
-- a legacy JSON skill file
-
-### Validate a skill before import
-
-```bash
-node docs/agent-jump-start/scripts/agent-jump-start.mjs validate-skill \
-  path/to/skill-directory
-```
+Each skill is a directory containing a `SKILL.md` with YAML frontmatter, plus optional `references/`, `scripts/`, and `assets/` subdirectories.
 
 ### Import a skill
 
 ```bash
-node docs/agent-jump-start/scripts/agent-jump-start.mjs import-skill \
+agent-jump-start import-skill \
   --spec docs/agent-jump-start/canonical-spec.yaml \
   --skill path/to/skill-directory
-```
 
-To overwrite an existing skill with the same slug:
-
-```bash
-node docs/agent-jump-start/scripts/agent-jump-start.mjs import-skill \
+# Overwrite an existing skill with the same slug
+agent-jump-start import-skill \
   --spec docs/agent-jump-start/canonical-spec.yaml \
   --skill path/to/skill-directory \
   --replace
 ```
 
-After import:
+Supported import sources:
+
+- A skill directory (e.g. `path/to/python-pro/`)
+- An installed skill package (e.g. `.agents/skills/python-pro/`)
+- A standalone `SKILL.md` file
+- A legacy JSON skill file
+
+### Validate a skill before import
 
 ```bash
-node docs/agent-jump-start/scripts/agent-jump-start.mjs render \
-  --spec docs/agent-jump-start/canonical-spec.yaml \
-  --target . --clean
-
-node docs/agent-jump-start/scripts/agent-jump-start.mjs check \
-  --spec docs/agent-jump-start/canonical-spec.yaml \
-  --target .
+agent-jump-start validate-skill path/to/skill-directory
 ```
 
-### Common external sources
-
-Developers currently install and distribute skills in a few common ways:
-
-- clone a public skills repository and import a skill directory directly
-- use `npx skills add <repo> --skill <name>` to install project-level skills
-- use `npx skills add <repo> --skill <name> -g` to install user-level skills
-- share a standalone `SKILL.md` package
-
-In the public Agent Skills ecosystem, `.agents/skills/` is now a strong cross-client convention. GitHub also documents `.agents/skills/`, `.claude/skills/`, and `.github/skills/` as supported project skill locations.
-
-## Export
-
-Export one skill as a portable package:
+### Export a skill
 
 ```bash
-node docs/agent-jump-start/scripts/agent-jump-start.mjs export-skill \
+agent-jump-start export-skill \
   --spec docs/agent-jump-start/canonical-spec.yaml \
   --slug python-pro \
   --output ./exported-skills/python-pro
 ```
 
-Export the canonical spec schema:
+### External skill fidelity
 
-```bash
-node docs/agent-jump-start/scripts/agent-jump-start.mjs export-schema \
-  --output docs/agent-jump-start/canonical-spec.schema.json
+Imported skills preserve their original structure and semantic intent:
+
+- Each H2 section becomes its own category (not flattened)
+- Section ordering is maintained via priority numbers
+- Prose sections are preserved as rule guidance
+- Round-trip stability: import, export, re-import produces identical output
+
+### Semantic rule classification
+
+Rules support automatic semantic classification during import:
+
+- **Prohibition detection** — language like `must not`, `never`, `avoid`, `do not` is auto-detected and tagged on individual rules, while positive directives in the same section are correctly classified as directives
+- **Semantic tags** — rules carry an optional `semantic` field (`directive`, `prohibition`, `workflow`, `example`, `reference`) preserved through rendering and export
+- **Rendered output** — semantic tags appear as `[PROHIBITION]`, `[WORKFLOW]`, `[EXAMPLE]` markers in detailed guidance
+
+## How Synchronization Works
+
+```text
+canonical-spec.yaml
+  -> .agents/AGENTS.md           (canonical workspace governance)
+  -> .agents/skills/<slug>/      (canonical skill packages)
+  -> agent-specific mirrors and projections
 ```
 
-## What Gets Generated
+1. The spec is validated.
+2. `.agents/AGENTS.md` is rendered as the canonical workspace instruction file.
+3. Skills are rendered into canonical `.agents/skills/<slug>/` packages.
+4. `.claude/skills/` and `.github/skills/` are generated as byte-identical mirrors.
+5. Cursor gets MDC projections.
+6. Agents without native skill folders receive mirrored workspace guidance plus inline skill summaries.
+7. `generated-manifest.json` records managed files so `check` and `--clean` can detect drift and stale outputs.
+
+## Generated Output
 
 Typical render output:
 
@@ -245,27 +235,6 @@ CONVENTIONS.md
 docs/agent-review-checklist.md
 docs/agent-jump-start/generated-manifest.json
 ```
-
-## How Synchronization Works
-
-The synchronization model is:
-
-```text
-canonical-spec.yaml
-  -> .agents/AGENTS.md
-  -> .agents/skills/<slug>/
-  -> agent-specific mirrors and projections
-```
-
-In practice:
-
-1. The spec is validated.
-2. `.agents/AGENTS.md` is rendered as the canonical workspace instruction file.
-3. Skills are rendered into canonical `.agents/skills/<slug>/` packages.
-4. `.claude/skills/` and `.github/skills/` are generated as byte-identical mirrors of the canonical packages.
-5. Cursor gets MDC projections.
-6. Agents without native skill folders receive mirrored workspace guidance plus inline skill summaries.
-7. `generated-manifest.json` records managed files so `check` and `--clean` can detect drift and stale outputs.
 
 ## Minimal Spec Example
 
@@ -315,71 +284,38 @@ In practice:
 ## CLI Reference
 
 ```bash
-node scripts/agent-jump-start.mjs --help
-node scripts/agent-jump-start.mjs --version
-node scripts/agent-jump-start.mjs list-agents
-node scripts/agent-jump-start.mjs list-profiles
+agent-jump-start --help
+agent-jump-start --version
+agent-jump-start list-agents
+agent-jump-start list-profiles
 
-node scripts/agent-jump-start.mjs init --target .
-node scripts/agent-jump-start.mjs bootstrap --base specs/base-spec.yaml --output canonical-spec.yaml
-node scripts/agent-jump-start.mjs render --spec canonical-spec.yaml --target . --clean
-node scripts/agent-jump-start.mjs check --spec canonical-spec.yaml --target .
-node scripts/agent-jump-start.mjs validate --spec canonical-spec.yaml
+agent-jump-start init [--profile <path>] [--target <path>]
+agent-jump-start bootstrap --base <path> [--profile <path>] [--output <path>]
+agent-jump-start render --spec <path> [--target <path>] [--clean]
+agent-jump-start check --spec <path> [--target <path>]
+agent-jump-start validate --spec <path>
 
-node scripts/agent-jump-start.mjs validate-skill path/to/skill-directory
-node scripts/agent-jump-start.mjs import-skill --spec canonical-spec.yaml --skill path/to/skill-directory
-node scripts/agent-jump-start.mjs export-skill --spec canonical-spec.yaml --slug my-skill --output ./exported-skills/my-skill
-node scripts/agent-jump-start.mjs export-schema --output canonical-spec.schema.json
+agent-jump-start validate-skill <path>
+agent-jump-start import-skill --spec <path> --skill <path> [--replace]
+agent-jump-start export-skill --spec <path> --slug <name> --output <path>
+agent-jump-start export-schema [--output <path>]
 ```
 
-## Testing
+All commands work identically via `npx @marcogoldin/agent-jump-start`, `yarn dlx @marcogoldin/agent-jump-start`, or the vendored `node docs/agent-jump-start/scripts/agent-jump-start.mjs`.
 
-Run:
+## Export Schema
+
+Export the canonical spec JSON Schema for IDE autocompletion and validation:
 
 ```bash
-npm test
+agent-jump-start export-schema --output canonical-spec.schema.json
 ```
-
-63 tests covering:
-
-- `init -> render -> check` workflows
-- canonical `.agents/` governance rendering
-- native mirror byte-parity for skill packages
-- references, scripts, and assets
-- external skill import and export
-- schema export and validation
-- stale-file cleanup
-- external skill fidelity (section preservation, prohibition detection, prose preservation)
-- mixed constraint classification (positive directives vs prohibitions)
-- mirror sync integrity (SKILL.md, references, render output)
-- round-trip stability (import → export → re-import)
-
-## What's New in v1.8.1
-
-### External Skill Fidelity (fixed)
-
-Imported skills now preserve their original structure and semantic intent:
-
-- Each H2 section becomes its own category (not flattened to "General")
-- Prohibition language (`must not`, `never`, `avoid`, `do not`) is auto-detected on individual rules
-- **Positive directives in mixed sections are classified correctly** — "Must use type annotations" stays a directive, "Must not use mutable defaults" becomes a prohibition
-- Prose sections are preserved as rule guidance
-- Section ordering is maintained via priority numbers
-- Round-trip fidelity (import → export → re-import) is stable
-
-### Semantic Rule Tags
-
-Rules support an optional `semantic` field: `"directive"`, `"prohibition"`, `"workflow"`, `"example"`, `"reference"`. Auto-detected on import, preserved through rendering and export. Rendered as `[PROHIBITION]`, `[WORKFLOW]`, `[EXAMPLE]` tags in detailed guidance.
-
-### Test Coverage
-
-63 automated tests covering core workflows, governance, validation, skill import/export, progressive disclosure, external skill fidelity, mirror sync integrity, and mixed-constraint classification.
 
 ## Current Limitations
 
-- Monorepo overlays, lockfiles, and remote registry workflows are not implemented yet.
+- Monorepo overlays, lockfiles, and remote registry workflows are not implemented.
 - Continue, Aider, Windsurf, Cline, and Roo Code do not receive native skill packages; they receive mirrored workspace guidance plus inline skill summaries.
-- Remote skill import (from URLs or registries) is not yet supported; skills must be available locally.
+- Remote skill import (from URLs or registries) is not supported; skills must be available locally.
 
 ## Portability
 
@@ -392,6 +328,14 @@ If your team wants a different implementation language, you can preserve:
 - the synchronization model
 
 and reimplement the renderer elsewhere.
+
+## Testing
+
+```bash
+npm test
+```
+
+63 tests covering core workflows, governance rendering, skill import/export, progressive disclosure, semantic classification, mirror sync integrity, and round-trip stability.
 
 ## Contributing
 
