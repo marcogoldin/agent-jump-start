@@ -70,8 +70,8 @@ Initialize a project with one command:
 # With global install
 agent-jump-start init --target .
 
-# With npx
-npx @marcogoldin/agent-jump-start@latest init --target .
+# Guided onboarding with project introspection
+agent-jump-start init --guided --target .
 
 # With a built-in stack profile
 npx @marcogoldin/agent-jump-start@latest init \
@@ -79,11 +79,40 @@ npx @marcogoldin/agent-jump-start@latest init \
   --target .
 ```
 
+If `npx @marcogoldin/agent-jump-start@latest ...` does not resolve the published bin in your npm environment, use a global install or the vendored `node docs/agent-jump-start/scripts/agent-jump-start.mjs ...` path instead.
+
 This creates:
 
 - `docs/agent-jump-start/canonical-spec.yaml` — your canonical specification
 - `docs/agent-jump-start/` — framework files (scripts, lib, specs, prompts)
 - All generated instruction files for the 9 supported agents
+
+## Guided Onboarding
+
+Use `init --guided` when you want Agent Jump Start to inspect the repository and propose a starting spec interactively.
+
+```bash
+agent-jump-start init --guided --target .
+```
+
+Guided onboarding currently scans for:
+
+- `package.json` dependency signals such as Express, React, Next.js, Vue, NestJS, Fastify, MUI, Tailwind, AWS SDKs
+- Python manifests such as `pyproject.toml`, `requirements.txt`, `Pipfile`, `setup.py`
+- mixed-runtime signals such as `pymilvus`, `boto3`, FastAPI, Django, Flask
+- lockfiles to infer npm / yarn / pnpm / bun
+- `Dockerfile`, `docker-compose.yml`, `.github/workflows`, `tsconfig.json`
+
+The guided flow proposes:
+
+- project name
+- project summary
+- repository components
+- package manager rule
+- runtime rule
+- whether to keep the review checklist
+
+It works both in a real TTY and with piped stdin, so it can be tested or automated in CI.
 
 ## Workflow
 
@@ -336,7 +365,7 @@ agent-jump-start --version
 agent-jump-start list-agents
 agent-jump-start list-profiles
 
-agent-jump-start init [--profile <path>] [--target <path>]
+agent-jump-start init [--guided] [--profile <path>] [--target <path>]
 agent-jump-start bootstrap --base <path> [--profile <path>] [--output <path>]
 agent-jump-start render --spec <path> [--target <path>] [--clean]
 agent-jump-start check --spec <path> [--target <path>]
@@ -349,7 +378,7 @@ agent-jump-start export-skill --spec <path> --slug <name> --output <path>
 agent-jump-start export-schema [--output <path>]
 ```
 
-All commands work identically via `agent-jump-start`, `npx @marcogoldin/agent-jump-start@latest`, or the vendored `node docs/agent-jump-start/scripts/agent-jump-start.mjs`.
+The most reliable execution paths are `agent-jump-start` after a global install and the vendored `node docs/agent-jump-start/scripts/agent-jump-start.mjs`. `npx @marcogoldin/agent-jump-start@latest ...` may also work, but some npm environments do not resolve the published bin consistently.
 
 ## Export Schema
 
@@ -365,6 +394,7 @@ agent-jump-start export-schema --output canonical-spec.schema.json
 - Continue, Aider, Windsurf, Cline, and Roo Code do not receive native skill packages; they receive mirrored workspace guidance plus inline skill summaries.
 - Remote skill import is currently limited to GitHub sources plus `skills` and `skillfish` adapters. Generic registries and provenance lockfiles are not implemented yet.
 - Skills installed directly by third-party CLIs into `./.agents/skills/` remain unmanaged until they are imported into the canonical spec.
+- Direct `npx @marcogoldin/agent-jump-start@latest ...` execution may not resolve the published bin consistently across npm environments; global install and vendored usage are the most reliable paths today.
 
 ## Portability
 
@@ -384,7 +414,7 @@ and reimplement the renderer elsewhere.
 npm test
 ```
 
-75 tests covering core workflows, governance rendering, skill import/export, progressive disclosure, high-level source adapters, semantic classification, mirror sync integrity, and round-trip stability.
+85 tests covering core workflows, guided onboarding, project introspection, skill import/export, progressive disclosure, high-level source adapters, semantic classification, mirror sync integrity, and round-trip stability.
 
 ## Contributing
 
