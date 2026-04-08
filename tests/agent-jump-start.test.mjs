@@ -1885,3 +1885,199 @@ Round-trip fidelity for mixed constraints.
     cleanupTempDir(tempDir);
   }
 });
+
+// ===========================================================================
+// Trigger and activation metadata tests (P2.2)
+// ===========================================================================
+
+test("trigger metadata fields are projected into rendered SKILL.md frontmatter", () => {
+  const tempDir = makeTempDir();
+  try {
+    const skill = makeSkillFixture({
+      triggers: ["python", "type hints", "async"],
+      globs: ["**/*.py", "src/**/*.pyi"],
+      alwaysApply: false,
+      manualOnly: false,
+      relatedSkills: ["nodejs-expert", "testing-pro"],
+      compatibility: ["claude-code", "cursor", "github-agents"],
+    });
+    const spec = makeMinimalSpec({ skills: [skill] });
+    const specPath = writeSpec(tempDir, spec);
+
+    expectSuccess(runCli(["render", "--spec", specPath, "--target", tempDir]));
+    expectSuccess(runCli(["check", "--spec", specPath, "--target", tempDir]));
+
+    const skillMd = readFileSync(join(tempDir, ".agents/skills/test-skill/SKILL.md"), "utf8");
+
+    assert.match(skillMd, /triggers:/, "SKILL.md should contain triggers field");
+    assert.match(skillMd, /"python"/, "SKILL.md should list python trigger");
+    assert.match(skillMd, /globs:/, "SKILL.md should contain globs field");
+    assert.match(skillMd, /\*\*\/\*\.py/, "SKILL.md should list python glob");
+    assert.match(skillMd, /alwaysApply: false/, "SKILL.md should contain alwaysApply");
+    assert.match(skillMd, /relatedSkills:/, "SKILL.md should contain relatedSkills");
+    assert.match(skillMd, /"nodejs-expert"/, "SKILL.md should list related skill");
+    assert.match(skillMd, /compatibility:/, "SKILL.md should contain compatibility");
+    assert.match(skillMd, /"claude-code"/, "SKILL.md should list compatible client");
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("trigger metadata globs and alwaysApply are projected into Cursor MDC frontmatter", () => {
+  const tempDir = makeTempDir();
+  try {
+    const skill = makeSkillFixture({
+      globs: ["**/*.py", "tests/**/*.py"],
+      alwaysApply: true,
+    });
+    const spec = makeMinimalSpec({ skills: [skill] });
+    const specPath = writeSpec(tempDir, spec);
+
+    expectSuccess(runCli(["render", "--spec", specPath, "--target", tempDir]));
+
+    const mdcContent = readFileSync(join(tempDir, ".cursor/rules/test-skill.mdc"), "utf8");
+
+    assert.match(mdcContent, /alwaysApply: true/, "Cursor MDC should reflect alwaysApply: true");
+    assert.match(mdcContent, /globs: \*\*\/\*\.py/, "Cursor MDC should contain globs");
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("Cursor MDC defaults to alwaysApply: false when trigger metadata omits it", () => {
+  const tempDir = makeTempDir();
+  try {
+    const skill = makeSkillFixture();
+    const spec = makeMinimalSpec({ skills: [skill] });
+    const specPath = writeSpec(tempDir, spec);
+
+    expectSuccess(runCli(["render", "--spec", specPath, "--target", tempDir]));
+
+    const mdcContent = readFileSync(join(tempDir, ".cursor/rules/test-skill.mdc"), "utf8");
+
+    assert.match(mdcContent, /alwaysApply: false/, "Cursor MDC should default to alwaysApply: false");
+    assert.doesNotMatch(mdcContent, /globs:/, "Cursor MDC should not include globs when none specified");
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("trigger metadata survives export -> re-import round-trip", () => {
+  const tempDir = makeTempDir();
+  try {
+    const skill = makeSkillFixture({
+      triggers: ["react", "hooks"],
+      globs: ["src/**/*.tsx"],
+      alwaysApply: false,
+      relatedSkills: ["css-expert"],
+      compatibility: ["claude-code", "cursor"],
+    });
+    const spec = makeMinimalSpec({ skills: [skill] });
+    const specPath = writeSpec(tempDir, spec);
+
+    // Export
+    const exportDir = join(tempDir, "exported");
+    expectSuccess(runCli(["export-skill", "--spec", specPath, "--slug", "test-skill", "--output", exportDir]));
+
+    const exportedSkillMd = readFileSync(join(exportDir, "SKILL.md"), "utf8");
+    assert.match(exportedSkillMd, /triggers:/, "Exported SKILL.md should contain triggers");
+    assert.match(exportedSkillMd, /globs:/, "Exported SKILL.md should contain globs");
+    assert.match(exportedSkillMd, /relatedSkills:/, "Exported SKILL.md should contain relatedSkills");
+    assert.match(exportedSkillMd, /compatibility:/, "Exported SKILL.md should contain compatibility");
+
+    // Re-import
+    const newSpecPath = join(tempDir, "new-spec.yaml");
+    expectSuccess(runCli(["bootstrap", "--base", "specs/base-spec.yaml", "--output", newSpecPath]));
+    expectSuccess(runCli(["import-skill", "--spec", newSpecPath, "--skill", exportDir]));
+
+    const newSpec = JSON.parse(readFileSync(newSpecPath, "utf8"));
+    const reimported = newSpec.skills[0];
+
+    assert.deepEqual(reimported.triggers, ["react", "hooks"], "Triggers should survive round-trip");
+    assert.deepEqual(reimported.globs, ["src/**/*.tsx"], "Globs should survive round-trip");
+    assert.equal(reimported.alwaysApply, false, "alwaysApply should survive round-trip");
+    assert.deepEqual(reimported.relatedSkills, ["css-expert"], "relatedSkills should survive round-trip");
+    assert.deepEqual(reimported.compatibility, ["claude-code", "cursor"], "compatibility should survive round-trip");
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("validation rejects alwaysApply and manualOnly both true", () => {
+  const tempDir = makeTempDir();
+  try {
+    const skill = makeSkillFixture({
+      alwaysApply: true,
+      manualOnly: true,
+    });
+    const spec = makeMinimalSpec({ skills: [skill] });
+    const specPath = writeSpec(tempDir, spec);
+
+    const result = runCli(["validate", "--spec", specPath]);
+    expectFailure(result);
+    assert.match(result.stderr, /alwaysApply and manualOnly cannot both be true/);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("validation rejects invalid compatibility client names", () => {
+  const tempDir = makeTempDir();
+  try {
+    const skill = makeSkillFixture({
+      compatibility: ["claude-code", "not-a-real-agent"],
+    });
+    const spec = makeMinimalSpec({ skills: [skill] });
+    const specPath = writeSpec(tempDir, spec);
+
+    const result = runCli(["validate", "--spec", specPath]);
+    expectFailure(result);
+    assert.match(result.stderr, /not-a-real-agent.*not a recognized agent client/);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("validation accepts valid trigger metadata fields", () => {
+  const tempDir = makeTempDir();
+  try {
+    const skill = makeSkillFixture({
+      triggers: ["python", "async"],
+      globs: ["**/*.py"],
+      alwaysApply: false,
+      manualOnly: false,
+      relatedSkills: ["testing-pro"],
+      compatibility: ["claude-code", "cursor"],
+    });
+    const spec = makeMinimalSpec({ skills: [skill] });
+    const specPath = writeSpec(tempDir, spec);
+
+    expectSuccess(runCli(["validate", "--spec", specPath]));
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("SKILL.md mirrors are byte-identical when trigger metadata is present", () => {
+  const tempDir = makeTempDir();
+  try {
+    const skill = makeSkillFixture({
+      triggers: ["react"],
+      globs: ["**/*.tsx"],
+      relatedSkills: ["css-expert"],
+    });
+    const spec = makeMinimalSpec({ skills: [skill] });
+    const specPath = writeSpec(tempDir, spec);
+
+    expectSuccess(runCli(["render", "--spec", specPath, "--target", tempDir]));
+
+    const agentsSkill = readFileSync(join(tempDir, ".agents/skills/test-skill/SKILL.md"), "utf8");
+    const claudeSkill = readFileSync(join(tempDir, ".claude/skills/test-skill/SKILL.md"), "utf8");
+    const githubSkill = readFileSync(join(tempDir, ".github/skills/test-skill/SKILL.md"), "utf8");
+
+    assert.equal(agentsSkill, claudeSkill, "Claude mirror should be byte-identical to canonical");
+    assert.equal(agentsSkill, githubSkill, "GitHub mirror should be byte-identical to canonical");
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
