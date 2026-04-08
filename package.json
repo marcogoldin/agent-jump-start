@@ -1,6 +1,6 @@
 {
   "name": "@marcogoldin/agent-jump-start",
-  "version": "1.10.0",
+  "version": "1.10.1",
   "description": "Portable starter kit for keeping AI coding assistant instructions synchronized across 9 agent ecosystems from one canonical specification.",
   "type": "module",
   "main": "scripts/agent-jump-start.mjs",
