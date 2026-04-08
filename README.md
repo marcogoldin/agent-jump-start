@@ -49,7 +49,7 @@ yarn global add @marcogoldin/agent-jump-start
 Run any command directly without installing:
 
 ```bash
-npx @marcogoldin/agent-jump-start <command> [options]
+npx @marcogoldin/agent-jump-start@latest <command> [options]
 ```
 
 ### Clone from GitHub
@@ -71,10 +71,10 @@ Initialize a project with one command:
 agent-jump-start init --target .
 
 # With npx
-npx @marcogoldin/agent-jump-start init --target .
+npx @marcogoldin/agent-jump-start@latest init --target .
 
 # With a built-in stack profile
-npx @marcogoldin/agent-jump-start init \
+npx @marcogoldin/agent-jump-start@latest init \
   --profile specs/profiles/react-vite-mui.profile.yaml \
   --target .
 ```
@@ -159,6 +159,53 @@ Supported import sources:
 - An installed skill package (e.g. `.agents/skills/python-pro/`)
 - A standalone `SKILL.md` file
 - A legacy JSON skill file
+
+### Add a skill from a higher-level source
+
+`add-skill` resolves a source into a local SKILL.md package, then imports it into the canonical spec.
+
+```bash
+# Local path
+agent-jump-start add-skill \
+  ./external-skills/python-pro \
+  --spec docs/agent-jump-start/canonical-spec.yaml
+
+# GitHub tree URL
+agent-jump-start add-skill \
+  https://github.com/Jeffallan/claude-skills/tree/main/skills/python-pro \
+  --spec docs/agent-jump-start/canonical-spec.yaml
+
+# GitHub repository shorthand plus explicit skill name
+agent-jump-start add-skill \
+  github:vercel-labs/agent-skills \
+  --skill web-design-guidelines \
+  --spec docs/agent-jump-start/canonical-spec.yaml
+
+# Resolve through the open `skills` CLI
+agent-jump-start add-skill \
+  skills:vercel-labs/agent-skills \
+  --skill web-design-guidelines \
+  --spec docs/agent-jump-start/canonical-spec.yaml
+
+# Resolve through Skillfish
+agent-jump-start add-skill \
+  skillfish:nguyenthienthanh/aura-frog \
+  --skill nodejs-expert \
+  --spec docs/agent-jump-start/canonical-spec.yaml
+```
+
+Supported `add-skill` sources:
+
+- local filesystem paths
+- GitHub URLs and `github:<owner>/<repo>` shorthand
+- `skills:<package>` providers resolved with the `skills` CLI
+- `skillfish:<package>` providers resolved with Skillfish
+
+Notes:
+
+- `skills:` and `skillfish:` adapters require `npx` on `PATH`.
+- GitHub sources require `git` on `PATH`.
+- If a third-party tool already wrote a skill into `./.agents/skills/`, import that path into the spec so it becomes managed by Agent Jump Start.
 
 ### Validate a skill before import
 
@@ -297,11 +344,12 @@ agent-jump-start validate --spec <path>
 
 agent-jump-start validate-skill <path>
 agent-jump-start import-skill --spec <path> --skill <path> [--replace]
+agent-jump-start add-skill <source> --spec <path> [--skill <name>] [--replace] [--provider <name>]
 agent-jump-start export-skill --spec <path> --slug <name> --output <path>
 agent-jump-start export-schema [--output <path>]
 ```
 
-All commands work identically via `npx @marcogoldin/agent-jump-start`, `yarn dlx @marcogoldin/agent-jump-start`, or the vendored `node docs/agent-jump-start/scripts/agent-jump-start.mjs`.
+All commands work identically via `agent-jump-start`, `npx @marcogoldin/agent-jump-start@latest`, or the vendored `node docs/agent-jump-start/scripts/agent-jump-start.mjs`.
 
 ## Export Schema
 
@@ -313,9 +361,10 @@ agent-jump-start export-schema --output canonical-spec.schema.json
 
 ## Current Limitations
 
-- Monorepo overlays, lockfiles, and remote registry workflows are not implemented.
+- Monorepo overlays and lockfiles are not implemented.
 - Continue, Aider, Windsurf, Cline, and Roo Code do not receive native skill packages; they receive mirrored workspace guidance plus inline skill summaries.
-- Remote skill import (from URLs or registries) is not supported; skills must be available locally.
+- Remote skill import is currently limited to GitHub sources plus `skills` and `skillfish` adapters. Generic registries and provenance lockfiles are not implemented yet.
+- Skills installed directly by third-party CLIs into `./.agents/skills/` remain unmanaged until they are imported into the canonical spec.
 
 ## Portability
 
@@ -335,7 +384,7 @@ and reimplement the renderer elsewhere.
 npm test
 ```
 
-63 tests covering core workflows, governance rendering, skill import/export, progressive disclosure, semantic classification, mirror sync integrity, and round-trip stability.
+75 tests covering core workflows, governance rendering, skill import/export, progressive disclosure, high-level source adapters, semantic classification, mirror sync integrity, and round-trip stability.
 
 ## Contributing
 

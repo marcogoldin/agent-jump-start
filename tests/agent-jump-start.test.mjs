@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync, existsSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -15,9 +15,11 @@ function cleanupTempDir(directoryPath) {
   rmSync(directoryPath, { recursive: true, force: true });
 }
 
-function runCli(args) {
+function runCli(args, options = {}) {
   return spawnSync(process.execPath, [scriptPath, ...args], {
     encoding: "utf8",
+    cwd: options.cwd,
+    env: options.env,
   });
 }
 
@@ -54,6 +56,13 @@ function writeSpec(tempDir, spec, filename = "spec.yaml") {
   const path = join(tempDir, filename);
   writeFileSync(path, `${JSON.stringify(spec, null, 2)}\n`, "utf8");
   return path;
+}
+
+function makeExecutable(tempDir, name, content) {
+  const scriptPath = join(tempDir, name);
+  writeFileSync(scriptPath, content, "utf8");
+  chmodSync(scriptPath, 0o755);
+  return scriptPath;
 }
 
 function makeSkillFixture(overrides = {}) {
@@ -553,6 +562,197 @@ test("import-skill still works with JSON skill files", () => {
     const spec = JSON.parse(readFileSync(specPath, "utf8"));
     assert.equal(spec.skills.length, 1);
     assert.equal(spec.skills[0].slug, "json-skill");
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("add-skill imports a local SKILL.md directory", () => {
+  const tempDir = makeTempDir();
+  try {
+    const skillDir = join(tempDir, "local-skill");
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(join(skillDir, "SKILL.md"), `---
+name: local-added-skill
+description: Local add-skill smoke test.
+metadata:
+  version: "1.0.0"
+---
+
+# Local Added Skill
+
+Local add-skill smoke test.
+
+## When to Use This Skill
+
+- Testing add-skill
+`, "utf8");
+
+    const specPath = join(tempDir, "spec.yaml");
+    expectSuccess(runCli(["bootstrap", "--base", "specs/base-spec.yaml", "--output", specPath]));
+    const result = runCli(["add-skill", skillDir, "--spec", specPath]);
+    expectSuccess(result);
+    assert.match(result.stdout, /Resolved skill source/);
+    assert.match(result.stdout, /Added:.*local-added-skill/);
+
+    const spec = JSON.parse(readFileSync(specPath, "utf8"));
+    assert.equal(spec.skills.length, 1);
+    assert.equal(spec.skills[0].slug, "local-added-skill");
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("add-skill resolves skills: sources via npx in a temporary project", () => {
+  const tempDir = makeTempDir();
+  try {
+    const binDir = join(tempDir, "bin");
+    mkdirSync(binDir, { recursive: true });
+    makeExecutable(binDir, "npx", `#!/bin/sh
+if [ "$2" = "skills" ] && [ "$3" = "add" ]; then
+  mkdir -p "$PWD/.agents/skills/web-design-guidelines"
+  cat > "$PWD/.agents/skills/web-design-guidelines/SKILL.md" <<'EOF'
+---
+name: web-design-guidelines
+description: Skills adapter test.
+metadata:
+  version: "1.0.0"
+---
+
+# Web Design Guidelines
+
+Skills adapter test.
+
+## When to Use This Skill
+
+- Testing skills adapter
+EOF
+  exit 0
+fi
+echo "unexpected npx invocation: $@" >&2
+exit 1
+`);
+
+    const env = {
+      ...process.env,
+      PATH: `${binDir}:${process.env.PATH}`,
+    };
+
+    const specPath = join(tempDir, "spec.yaml");
+    expectSuccess(runCli(["bootstrap", "--base", "specs/base-spec.yaml", "--output", specPath], { env }));
+    const result = runCli(["add-skill", "skills:vercel-labs/agent-skills", "--skill", "web-design-guidelines", "--spec", specPath], { env });
+    expectSuccess(result);
+
+    const spec = JSON.parse(readFileSync(specPath, "utf8"));
+    assert.equal(spec.skills.length, 1);
+    assert.equal(spec.skills[0].slug, "web-design-guidelines");
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("add-skill resolves skillfish: sources via isolated HOME installs", () => {
+  const tempDir = makeTempDir();
+  try {
+    const binDir = join(tempDir, "bin");
+    mkdirSync(binDir, { recursive: true });
+    makeExecutable(binDir, "npx", `#!/bin/sh
+if [ "$2" = "skillfish" ] && [ "$3" = "add" ]; then
+  mkdir -p "$HOME/.claude/skills/nodejs-expert"
+  cat > "$HOME/.claude/skills/nodejs-expert/SKILL.md" <<'EOF'
+---
+name: nodejs-expert
+description: Skillfish adapter test.
+metadata:
+  version: "2.0.0"
+---
+
+# Nodejs Expert
+
+Skillfish adapter test.
+
+## When to Use This Skill
+
+- Testing skillfish adapter
+EOF
+  exit 0
+fi
+echo "unexpected npx invocation: $@" >&2
+exit 1
+`);
+
+    const env = {
+      ...process.env,
+      PATH: `${binDir}:${process.env.PATH}`,
+    };
+
+    const specPath = join(tempDir, "spec.yaml");
+    expectSuccess(runCli(["bootstrap", "--base", "specs/base-spec.yaml", "--output", specPath], { env }));
+    const result = runCli(["add-skill", "skillfish:nguyenthienthanh/aura-frog", "--skill", "nodejs-expert", "--spec", specPath], { env });
+    expectSuccess(result);
+
+    const spec = JSON.parse(readFileSync(specPath, "utf8"));
+    assert.equal(spec.skills.length, 1);
+    assert.equal(spec.skills[0].slug, "nodejs-expert");
+    assert.equal(spec.skills[0].version, "2.0.0");
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("add-skill resolves GitHub tree URLs through git clone", () => {
+  const tempDir = makeTempDir();
+  try {
+    const binDir = join(tempDir, "bin");
+    mkdirSync(binDir, { recursive: true });
+    makeExecutable(binDir, "git", `#!/bin/sh
+if [ "$1" = "clone" ]; then
+  dest=""
+  for arg in "$@"; do
+    dest="$arg"
+  done
+  mkdir -p "$dest/skills/github-skill"
+  cat > "$dest/skills/github-skill/SKILL.md" <<'EOF'
+---
+name: github-skill
+description: GitHub adapter test.
+metadata:
+  version: "3.0.0"
+---
+
+# GitHub Skill
+
+GitHub adapter test.
+
+## When to Use This Skill
+
+- Testing GitHub adapter
+EOF
+  exit 0
+fi
+echo "unexpected git invocation: $@" >&2
+exit 1
+`);
+
+    const env = {
+      ...process.env,
+      PATH: `${binDir}:${process.env.PATH}`,
+    };
+
+    const specPath = join(tempDir, "spec.yaml");
+    expectSuccess(runCli(["bootstrap", "--base", "specs/base-spec.yaml", "--output", specPath], { env }));
+    const result = runCli([
+      "add-skill",
+      "https://github.com/example/repo/tree/main/skills/github-skill",
+      "--spec",
+      specPath,
+    ], { env });
+    expectSuccess(result);
+
+    const spec = JSON.parse(readFileSync(specPath, "utf8"));
+    assert.equal(spec.skills.length, 1);
+    assert.equal(spec.skills[0].slug, "github-skill");
+    assert.equal(spec.skills[0].version, "3.0.0");
   } finally {
     cleanupTempDir(tempDir);
   }

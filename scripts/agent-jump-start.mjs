@@ -3,7 +3,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, writeFileSync, rmSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 
 import { TOOL_VERSION, SUPPORTED_AGENTS, AGENT_COUNT } from "../lib/constants.mjs";
@@ -11,7 +11,7 @@ import { parseArgs, assertRequired, readJsonYaml, stringifyJsonYaml, deepMerge, 
 import { validateSpec, validateSkill, validateSkillMdFrontmatter } from "../lib/validation.mjs";
 import { renderGeneratedFiles } from "../lib/renderers.mjs";
 import { writeGeneratedFiles, checkGeneratedFiles, cleanStaleFiles, cleanDirectoryIfExists, discoverPackageRoot, listAvailableProfiles, listManagedFiles } from "../lib/files.mjs";
-import { readExternalSkill, readSkillMdFile, readSkillDirectory, exportSkillPackage, parseSkillMdFrontmatter } from "../lib/skills.mjs";
+import { readExternalSkill, readSkillMdFile, readSkillDirectory, exportSkillPackage, parseSkillMdFrontmatter, resolveSkillImportSource } from "../lib/skills.mjs";
 import { CANONICAL_SPEC_SCHEMA } from "../lib/schema.mjs";
 
 // ---------------------------------------------------------------------------
@@ -29,6 +29,7 @@ Commands:
   validate       --spec <path>
   validate-skill <path>   (SKILL.md file or skill directory)
   import-skill   --spec <path> --skill <path> [--replace]
+  add-skill      <source> --spec <path> [--skill <name>] [--replace] [--provider <name>]
   export-skill   --spec <path> --slug <slug> --output <path>
   export-schema  [--output <path>]
   list-agents
@@ -39,7 +40,7 @@ Options:
   --version   Show version number
 
 Examples:
-  npx @marcogoldin/agent-jump-start init \\
+  npx @marcogoldin/agent-jump-start@latest init \\
     --profile specs/profiles/react-vite-mui.profile.yaml
 
   node scripts/agent-jump-start.mjs bootstrap \\
@@ -62,6 +63,15 @@ Examples:
   node scripts/agent-jump-start.mjs import-skill \\
     --spec canonical-spec.yaml \\
     --skill path/to/skills/python-pro
+
+  node scripts/agent-jump-start.mjs add-skill \\
+    github:Jeffallan/claude-skills/tree/main/skills/python-pro \\
+    --spec canonical-spec.yaml
+
+  node scripts/agent-jump-start.mjs add-skill \\
+    skills:vercel-labs/agent-skills \\
+    --skill web-design-guidelines \\
+    --spec canonical-spec.yaml
 
   node scripts/agent-jump-start.mjs export-skill \\
     --spec canonical-spec.yaml --slug react-best-practices \\
@@ -103,6 +113,49 @@ function main() {
   }
 
   const { command, options } = parseArgs(args);
+
+  function importSkillsIntoSpec(specPathInput, sourcePathInput, replaceExisting = false) {
+    const specPath = resolve(specPathInput);
+    if (!existsSync(specPath)) {
+      throw new Error(`Canonical spec not found: ${specPath}. Run bootstrap first.`);
+    }
+
+    const spec = readJsonYaml(specPathInput);
+    const importedSkills = readExternalSkill(sourcePathInput);
+
+    if (!Array.isArray(spec.skills)) {
+      spec.skills = [];
+    }
+
+    let added = 0;
+    let replaced = 0;
+    for (const skill of importedSkills) {
+      validateSkill(skill, sourcePathInput);
+      const existingIndex = spec.skills.findIndex((s) => s.slug === skill.slug);
+      if (existingIndex >= 0) {
+        if (replaceExisting) {
+          spec.skills[existingIndex] = skill;
+          replaced += 1;
+          console.log(`  Replaced: ${skill.slug} (v${skill.version})`);
+        } else {
+          console.log(`  Skipped:  ${skill.slug} (already exists, use --replace to overwrite)`);
+          continue;
+        }
+      } else {
+        if (!skill.author) {
+          skill.author = "Imported";
+        }
+        spec.skills.push(skill);
+        added += 1;
+        console.log(`  Added:    ${skill.slug} (v${skill.version})`);
+      }
+    }
+
+    writeFileSync(specPath, stringifyJsonYaml(spec), "utf8");
+    console.log(`\nImport complete: ${added} added, ${replaced} replaced in ${specPathInput}`);
+    console.log(`Total skills in spec: ${spec.skills.length}`);
+    console.log(`\nRun 'render' to regenerate instruction files for all ${AGENT_COUNT} agents.`);
+  }
 
   // -------------------------------------------------------------------
   // init
@@ -367,45 +420,36 @@ function main() {
   if (command === "import-skill") {
     assertRequired(options, "spec", command);
     assertRequired(options, "skill", command);
-    const specPath = resolve(options.spec);
-    if (!existsSync(specPath)) {
-      throw new Error(`Canonical spec not found: ${specPath}. Run bootstrap first.`);
-    }
-    const spec = readJsonYaml(options.spec);
-    const importedSkills = readExternalSkill(options.skill);
+    importSkillsIntoSpec(options.spec, options.skill, Boolean(options.replace));
+    return;
+  }
 
-    if (!Array.isArray(spec.skills)) {
-      spec.skills = [];
+  // -------------------------------------------------------------------
+  // add-skill
+  // -------------------------------------------------------------------
+  if (command === "add-skill") {
+    assertRequired(options, "spec", command);
+    const source = args[1];
+    if (!source) {
+      throw new Error("Usage: add-skill <source> --spec <path> [--skill <name>] [--replace] [--provider <name>]");
     }
 
-    let added = 0;
-    let replaced = 0;
-    for (const skill of importedSkills) {
-      validateSkill(skill, options.skill);
-      const existingIndex = spec.skills.findIndex((s) => s.slug === skill.slug);
-      if (existingIndex >= 0) {
-        if (options.replace) {
-          spec.skills[existingIndex] = skill;
-          replaced += 1;
-          console.log(`  Replaced: ${skill.slug} (v${skill.version})`);
-        } else {
-          console.log(`  Skipped:  ${skill.slug} (already exists, use --replace to overwrite)`);
-          continue;
-        }
-      } else {
-        if (!skill.author) {
-          skill.author = "Imported";
-        }
-        spec.skills.push(skill);
-        added += 1;
-        console.log(`  Added:    ${skill.slug} (v${skill.version})`);
+    let cleanupPath = null;
+    try {
+      const resolved = resolveSkillImportSource(source, {
+        provider: options.provider ?? null,
+        skill: options.skill ?? null,
+      });
+      cleanupPath = resolved.cleanupPath;
+
+      console.log(`Resolved skill source: ${resolved.sourceLabel}`);
+      console.log(`  Import path: ${resolved.importPath}`);
+      importSkillsIntoSpec(options.spec, resolved.importPath, Boolean(options.replace));
+    } finally {
+      if (cleanupPath) {
+        rmSync(cleanupPath, { recursive: true, force: true });
       }
     }
-
-    writeFileSync(specPath, stringifyJsonYaml(spec), "utf8");
-    console.log(`\nImport complete: ${added} added, ${replaced} replaced in ${options.spec}`);
-    console.log(`Total skills in spec: ${spec.skills.length}`);
-    console.log(`\nRun 'render' to regenerate instruction files for all ${AGENT_COUNT} agents.`);
     return;
   }
 
