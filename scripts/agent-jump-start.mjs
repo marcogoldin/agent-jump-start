@@ -13,6 +13,7 @@ import { renderGeneratedFiles } from "../lib/renderers.mjs";
 import { writeGeneratedFiles, checkGeneratedFiles, cleanStaleFiles, cleanDirectoryIfExists, discoverPackageRoot, listAvailableProfiles, listManagedFiles } from "../lib/files.mjs";
 import { readExternalSkill, readSkillMdFile, readSkillDirectory, exportSkillPackage, parseSkillMdFrontmatter, resolveSkillImportSource } from "../lib/skills.mjs";
 import { CANONICAL_SPEC_SCHEMA } from "../lib/schema.mjs";
+import { runGuidedSetup } from "../lib/interactive.mjs";
 
 // ---------------------------------------------------------------------------
 // Usage
@@ -22,7 +23,7 @@ function usage() {
   console.log(`Agent Jump Start v${TOOL_VERSION}
 
 Commands:
-  init           [--profile <path>] [--target <path>]
+  init           [--guided] [--profile <path>] [--target <path>]
   bootstrap      --base <path> [--profile <path>] [--output <path>]
   render         --spec <path> [--target <path>] [--clean]
   check          --spec <path> [--target <path>]
@@ -99,7 +100,7 @@ Supported Agents:
 // Main
 // ---------------------------------------------------------------------------
 
-function main() {
+async function main() {
   const args = process.argv.slice(2);
 
   if (args.includes("--version")) {
@@ -179,6 +180,8 @@ function main() {
       "lib/files.mjs",
       "lib/skills.mjs",
       "lib/schema.mjs",
+      "lib/introspection.mjs",
+      "lib/interactive.mjs",
       "specs/base-spec.yaml",
       "prompts/01-bootstrap-any-agent.md",
       "prompts/02-change-stack-or-guidelines.md",
@@ -202,16 +205,27 @@ function main() {
 
     const baseSpec = readJsonYaml(basePath);
     let mergedSpec = baseSpec;
-    if (options.profile) {
-      const profilePath = resolve(options.profile);
-      mergedSpec = deepMerge(baseSpec, readJsonYaml(profilePath));
-      console.log(`  Applied profile: ${options.profile}`);
-    } else if (profiles.length > 0) {
-      console.log(`\n  Available profiles (use --profile to apply one):`);
-      for (const p of profiles) {
-        console.log(`    --profile ${relative(process.cwd(), p.path) || p.path}`);
+
+    if (options.guided) {
+      // --- Guided interactive setup ---
+      if (options.profile) {
+        mergedSpec = deepMerge(baseSpec, readJsonYaml(resolve(options.profile)));
+        console.log(`  Applied profile: ${options.profile}`);
       }
-      console.log("");
+      mergedSpec = await runGuidedSetup(targetRoot, mergedSpec);
+    } else {
+      // --- Classic non-interactive setup ---
+      if (options.profile) {
+        const profilePath = resolve(options.profile);
+        mergedSpec = deepMerge(baseSpec, readJsonYaml(profilePath));
+        console.log(`  Applied profile: ${options.profile}`);
+      } else if (profiles.length > 0) {
+        console.log(`\n  Available profiles (use --profile to apply one):`);
+        for (const p of profiles) {
+          console.log(`    --profile ${relative(process.cwd(), p.path) || p.path}`);
+        }
+        console.log("");
+      }
     }
 
     validateSpec(mergedSpec, "init");
@@ -228,7 +242,11 @@ function main() {
     const scriptRel = relative(targetRoot, join(ajsDir, "scripts/agent-jump-start.mjs"));
 
     console.log(`\nDone! Next steps:`);
-    console.log(`  1. Edit ${specRel} with your real project details`);
+    if (options.guided) {
+      console.log(`  1. Review ${specRel} and refine as needed`);
+    } else {
+      console.log(`  1. Edit ${specRel} with your real project details`);
+    }
     console.log(`  2. Run: node ${scriptRel} render --spec ${specRel} --target . --clean`);
     console.log(`  3. Commit both the spec and the generated files`);
     return;
@@ -522,9 +540,7 @@ function main() {
   process.exit(1);
 }
 
-try {
-  main();
-} catch (err) {
+main().catch((err) => {
   console.error(err.message);
   process.exit(1);
-}
+});

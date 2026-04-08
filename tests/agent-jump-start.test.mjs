@@ -4,6 +4,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync, existsSync
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
+import { introspectProject, formatDetectedComponents, suggestPackageManagerRule, suggestRuntimeRule } from "../lib/introspection.mjs";
 
 const scriptPath = resolve("scripts/agent-jump-start.mjs");
 
@@ -2277,6 +2278,193 @@ test("SKILL.md mirrors are byte-identical when trigger metadata is present", () 
 
     assert.equal(agentsSkill, claudeSkill, "Claude mirror should be byte-identical to canonical");
     assert.equal(agentsSkill, githubSkill, "GitHub mirror should be byte-identical to canonical");
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+// ===========================================================================
+// Project introspection tests
+// ===========================================================================
+
+test("introspection detects Node.js project with Express from package.json", () => {
+  const tempDir = makeTempDir();
+  try {
+    writeFileSync(join(tempDir, "package.json"), JSON.stringify({
+      name: "my-api",
+      dependencies: { express: "^4.18.0", cors: "^2.8.0" },
+    }), "utf8");
+
+    const result = introspectProject(tempDir);
+
+    assert.equal(result.projectName, "my-api");
+    assert.ok(result.runtimes.includes("Node.js"));
+    assert.equal(result.packageManager, "npm");
+    assert.ok(result.components.some((c) => c.type === "api" && /Express/.test(c.detail)),
+      "Should detect Express as an api component");
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("introspection detects Python project with pymilvus from requirements.txt", () => {
+  const tempDir = makeTempDir();
+  try {
+    writeFileSync(join(tempDir, "requirements.txt"), "pymilvus>=2.3.0\nboto3\npytest\n", "utf8");
+
+    const result = introspectProject(tempDir);
+
+    assert.ok(result.runtimes.includes("Python"));
+    assert.ok(result.components.some((c) => c.type === "retrieval" && /pymilvus/.test(c.detail)),
+      "Should detect pymilvus as a retrieval component");
+    assert.ok(result.signals.some((s) => s.package === "boto3"),
+      "Should detect boto3 as an infra signal");
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("introspection detects mixed Node.js + Python project", () => {
+  const tempDir = makeTempDir();
+  try {
+    writeFileSync(join(tempDir, "package.json"), JSON.stringify({
+      name: "@scope/mixed-app",
+      dependencies: { react: "^18.0.0", vite: "^5.0.0" },
+      devDependencies: { typescript: "^5.0.0" },
+    }), "utf8");
+    writeFileSync(join(tempDir, "requirements.txt"), "fastapi\nsqlalchemy\n", "utf8");
+    writeFileSync(join(tempDir, "tsconfig.json"), "{}", "utf8");
+    mkdirSync(join(tempDir, ".github/workflows"), { recursive: true });
+
+    const result = introspectProject(tempDir);
+
+    assert.equal(result.projectName, "mixed-app", "Should strip npm scope from name");
+    assert.ok(result.runtimes.includes("Node.js"));
+    assert.ok(result.runtimes.includes("Python"));
+    assert.ok(result.components.some((c) => c.type === "web" && /React/.test(c.detail)));
+    assert.ok(result.components.some((c) => c.type === "api" && /FastAPI/.test(c.detail)));
+    assert.ok(result.signals.some((s) => s.file === "tsconfig.json"));
+    assert.ok(result.signals.some((s) => s.type === "ci"));
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("introspection detects Docker and lock file signals", () => {
+  const tempDir = makeTempDir();
+  try {
+    writeFileSync(join(tempDir, "package.json"), JSON.stringify({ name: "dockerized" }), "utf8");
+    writeFileSync(join(tempDir, "yarn.lock"), "", "utf8");
+    writeFileSync(join(tempDir, "Dockerfile"), "FROM node:20\n", "utf8");
+    writeFileSync(join(tempDir, "docker-compose.yml"), "version: '3'\n", "utf8");
+
+    const result = introspectProject(tempDir);
+
+    assert.equal(result.packageManager, "yarn");
+    assert.ok(result.signals.some((s) => s.detail === "Containerized workflow"));
+    assert.ok(result.signals.some((s) => s.detail === "Docker Compose orchestration"));
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("introspection falls back to directory name when no manifest has a project name", () => {
+  const tempDir = makeTempDir();
+  try {
+    const result = introspectProject(tempDir);
+    assert.ok(result.projectName, "Should have a fallback project name from directory");
+    assert.equal(result.components.length, 0);
+    assert.equal(result.runtimes.length, 0);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("formatDetectedComponents produces spec-ready strings", () => {
+  const components = [
+    { type: "api", detail: "Express.js REST service", source: "package.json" },
+    { type: "retrieval", detail: "Milvus vector search (pymilvus)", source: "requirements.txt" },
+  ];
+  const formatted = formatDetectedComponents(components);
+  assert.deepEqual(formatted, [
+    "api: Express.js REST service",
+    "retrieval: Milvus vector search (pymilvus)",
+  ]);
+});
+
+test("suggestPackageManagerRule returns correct rule for npm", () => {
+  const rule = suggestPackageManagerRule("npm");
+  assert.match(rule, /Use npm/);
+  assert.match(rule, /Do not introduce yarn, pnpm, bun/);
+});
+
+test("suggestRuntimeRule returns correct rule for mixed runtimes", () => {
+  const rule = suggestRuntimeRule(["Node.js", "Python"]);
+  assert.match(rule, /Node\.js and Python/);
+});
+
+test("init --guided produces valid spec and passes check when stdin is piped", () => {
+  const tempDir = makeTempDir();
+  try {
+    // Create a fake project to introspect
+    writeFileSync(join(tempDir, "package.json"), JSON.stringify({
+      name: "guided-test-app",
+      dependencies: { express: "^4.18.0" },
+    }), "utf8");
+
+    // Pipe answers: project name (accept default), summary, accept components, include checklist, no skills
+    const stdinInput = "\nA test application\ny\ny\nn\n";
+
+    const result = spawnSync(process.execPath, [
+      scriptPath, "init", "--guided", "--target", tempDir,
+    ], {
+      encoding: "utf8",
+      input: stdinInput,
+    });
+
+    assert.equal(result.status, 0,
+      `Expected success.\nSTDOUT:\n${result.stdout}\nSTDERR:\n${result.stderr}`);
+
+    // Verify spec was created
+    const specPath = join(tempDir, "docs/agent-jump-start/canonical-spec.yaml");
+    assert.ok(existsSync(specPath), "Canonical spec should exist");
+
+    const spec = JSON.parse(readFileSync(specPath, "utf8"));
+    assert.equal(spec.project.name, "guided-test-app", "Should use detected project name");
+    assert.equal(spec.project.summary, "A test application");
+    assert.ok(spec.project.components.some((c) => /Express/.test(c)),
+      "Should include detected Express component");
+
+    // Verify check passes
+    const checkResult = spawnSync(process.execPath, [
+      scriptPath, "check", "--spec", specPath, "--target", tempDir,
+    ], { encoding: "utf8" });
+
+    assert.equal(checkResult.status, 0,
+      `Check should pass after guided init.\nSTDOUT:\n${checkResult.stdout}\nSTDERR:\n${checkResult.stderr}`);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("init --guided copies introspection and interactive modules to target", () => {
+  const tempDir = makeTempDir();
+  try {
+    writeFileSync(join(tempDir, "package.json"), JSON.stringify({ name: "copy-test" }), "utf8");
+
+    const stdinInput = "\nTest summary\nn\ny\nn\n";
+
+    const result = spawnSync(process.execPath, [
+      scriptPath, "init", "--guided", "--target", tempDir,
+    ], { encoding: "utf8", input: stdinInput });
+
+    assert.equal(result.status, 0,
+      `Expected success.\nSTDOUT:\n${result.stdout}\nSTDERR:\n${result.stderr}`);
+
+    assert.ok(existsSync(join(tempDir, "docs/agent-jump-start/lib/introspection.mjs")),
+      "introspection.mjs should be copied");
+    assert.ok(existsSync(join(tempDir, "docs/agent-jump-start/lib/interactive.mjs")),
+      "interactive.mjs should be copied");
   } finally {
     cleanupTempDir(tempDir);
   }
