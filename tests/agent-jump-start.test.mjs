@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { introspectProject, formatDetectedComponents, suggestPackageManagerRule, suggestRuntimeRule } from "../lib/introspection.mjs";
+import { mergeByKey, mergeSpecLayers, resolveLayeredSpec, resolveLayeredSpecWithMeta } from "../lib/merging.mjs";
 
 const scriptPath = resolve("scripts/agent-jump-start.mjs");
 
@@ -57,6 +58,10 @@ function writeSpec(tempDir, spec, filename = "spec.yaml") {
   const path = join(tempDir, filename);
   writeFileSync(path, `${JSON.stringify(spec, null, 2)}\n`, "utf8");
   return path;
+}
+
+function readLockfile(tempDir, filename = "agent-jump-start.lock.json") {
+  return JSON.parse(readFileSync(join(tempDir, filename), "utf8"));
 }
 
 function makeExecutable(tempDir, name, content) {
@@ -157,6 +162,9 @@ test("init copies lib/ modules for modular imports", () => {
     assert.ok(existsSync(join(ajsDir, "lib/files.mjs")), "lib/files.mjs should exist");
     assert.ok(existsSync(join(ajsDir, "lib/skills.mjs")), "lib/skills.mjs should exist");
     assert.ok(existsSync(join(ajsDir, "lib/schema.mjs")), "lib/schema.mjs should exist");
+    assert.ok(existsSync(join(ajsDir, "lib/doctor.mjs")), "lib/doctor.mjs should exist");
+    assert.ok(existsSync(join(ajsDir, "lib/lockfile.mjs")), "lib/lockfile.mjs should exist");
+    assert.ok(existsSync(join(ajsDir, "lib/source-info.mjs")), "lib/source-info.mjs should exist");
   } finally {
     cleanupTempDir(tempDir);
   }
@@ -510,6 +518,15 @@ An externally authored skill for import testing.
     assert.ok(skill.references?.length >= 1);
     assert.equal(skill.references[0].name, "advanced.md");
     assert.match(skill.references[0].content, /Advanced content/);
+
+    const lockfile = readLockfile(tempDir);
+    assert.equal(lockfile.schemaVersion, 1);
+    assert.equal(lockfile.skills.length, 1);
+    assert.equal(lockfile.skills[0].slug, "imported-skill");
+    assert.equal(lockfile.skills[0].sourceType, "local-directory");
+    assert.equal(lockfile.skills[0].provider, "local");
+    assert.equal(lockfile.skills[0].source, skillDir);
+    assert.match(lockfile.skills[0].checksum, /^sha256:/);
   } finally {
     cleanupTempDir(tempDir);
   }
@@ -599,6 +616,44 @@ Local add-skill smoke test.
     const spec = JSON.parse(readFileSync(specPath, "utf8"));
     assert.equal(spec.skills.length, 1);
     assert.equal(spec.skills[0].slug, "local-added-skill");
+
+    const lockfile = readLockfile(tempDir);
+    assert.equal(lockfile.skills.length, 1);
+    assert.equal(lockfile.skills[0].slug, "local-added-skill");
+    assert.equal(lockfile.skills[0].sourceType, "local-directory");
+    assert.equal(lockfile.skills[0].provider, "local");
+    assert.equal(lockfile.skills[0].source, skillDir);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("add-skill preserves local SKILL.md file provenance in the lockfile", () => {
+  const tempDir = makeTempDir();
+  try {
+    const skillMdPath = join(tempDir, "standalone-skill.md");
+    writeFileSync(skillMdPath, `---
+name: local-file-skill
+description: Local file add-skill smoke test.
+metadata:
+  version: "1.0.0"
+---
+
+# Local File Skill
+
+Standalone SKILL.md fixture.
+`, "utf8");
+
+    const specPath = join(tempDir, "spec.yaml");
+    expectSuccess(runCli(["bootstrap", "--base", "specs/base-spec.yaml", "--output", specPath]));
+    expectSuccess(runCli(["add-skill", skillMdPath, "--spec", specPath]));
+
+    const lockfile = readLockfile(tempDir);
+    assert.equal(lockfile.skills.length, 1);
+    assert.equal(lockfile.skills[0].slug, "local-file-skill");
+    assert.equal(lockfile.skills[0].sourceType, "local-skill-md");
+    assert.equal(lockfile.skills[0].provider, "local");
+    assert.equal(lockfile.skills[0].source, skillMdPath);
   } finally {
     cleanupTempDir(tempDir);
   }
@@ -754,6 +809,67 @@ exit 1
     assert.equal(spec.skills.length, 1);
     assert.equal(spec.skills[0].slug, "github-skill");
     assert.equal(spec.skills[0].version, "3.0.0");
+
+    const lockfile = readLockfile(tempDir);
+    assert.equal(lockfile.skills.length, 1);
+    assert.equal(lockfile.skills[0].slug, "github-skill");
+    assert.equal(lockfile.skills[0].sourceType, "github");
+    assert.equal(lockfile.skills[0].provider, "github");
+    assert.equal(lockfile.skills[0].source, "https://github.com/example/repo/tree/main/skills/github-skill");
+    assert.equal(lockfile.skills[0].treePath, "skills/github-skill");
+    assert.match(lockfile.skills[0].repoUrl, /^https:\/\/github\.com\/example\/repo\.git$/);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("import-skill --replace updates the existing lockfile entry instead of duplicating it", () => {
+  const tempDir = makeTempDir();
+  try {
+    const skillDir = join(tempDir, "replace-skill");
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(join(skillDir, "SKILL.md"), `---
+name: replaceable-skill
+description: Replace test skill.
+metadata:
+  version: "1.0.0"
+---
+
+# Replaceable Skill
+
+## When to Use This Skill
+
+- Testing replace
+`, "utf8");
+
+    const specPath = join(tempDir, "spec.yaml");
+    expectSuccess(runCli(["bootstrap", "--base", "specs/base-spec.yaml", "--output", specPath]));
+    expectSuccess(runCli(["import-skill", "--spec", specPath, "--skill", skillDir]));
+    const firstLockfile = readLockfile(tempDir);
+    assert.equal(firstLockfile.skills.length, 1);
+    const firstImportedAt = firstLockfile.skills[0].importedAt;
+
+    writeFileSync(join(skillDir, "SKILL.md"), `---
+name: replaceable-skill
+description: Replace test skill updated.
+metadata:
+  version: "2.0.0"
+---
+
+# Replaceable Skill
+
+## When to Use This Skill
+
+- Testing replace
+- Updated source
+`, "utf8");
+
+    expectSuccess(runCli(["import-skill", "--spec", specPath, "--skill", skillDir, "--replace"]));
+    const secondLockfile = readLockfile(tempDir);
+    assert.equal(secondLockfile.skills.length, 1);
+    assert.equal(secondLockfile.skills[0].slug, "replaceable-skill");
+    assert.equal(secondLockfile.skills[0].version, "2.0.0");
+    assert.notEqual(secondLockfile.skills[0].importedAt, firstImportedAt);
   } finally {
     cleanupTempDir(tempDir);
   }
@@ -930,8 +1046,9 @@ test("export-schema produces valid JSON Schema", () => {
     const schema = JSON.parse(readFileSync(schemaPath, "utf8"));
     assert.equal(schema.$schema, "https://json-schema.org/draft/2020-12/schema");
     assert.equal(schema.type, "object");
-    assert.ok(schema.required.includes("schemaVersion"));
-    assert.ok(schema.required.includes("project"));
+    assert.ok(schema.then?.required?.includes("schemaVersion"), "schemaVersion required when extends absent");
+    assert.ok(schema.then?.required?.includes("project"), "project required when extends absent");
+    assert.ok(schema.properties?.extends, "Schema should have extends property");
     assert.ok(schema.$defs?.skill, "Schema should define skill type");
     assert.ok(schema.$defs?.skillReference, "Schema should define skillReference type");
 
@@ -967,6 +1084,251 @@ test("render --clean removes stale files from previous render", () => {
     expectSuccess(result);
     assert.match(result.stdout, /Cleaned stale files/);
     assert.ok(!existsSync(join(tempDir, ".agents/skills/temporary-skill/SKILL.md")), "Stale skill file should be removed");
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+// ===========================================================================
+// Sync command tests
+// ===========================================================================
+
+test("sync renders files, cleans stale outputs, and passes check in one step", () => {
+  const tempDir = makeTempDir();
+  try {
+    const spec = makeMinimalSpec({
+      skills: [makeSkillFixture({ slug: "sync-test-skill" })],
+    });
+    const specPath = writeSpec(tempDir, spec);
+    const result = runCli(["sync", "--spec", specPath, "--target", tempDir]);
+    expectSuccess(result);
+    assert.match(result.stdout, /Rendered files/);
+    assert.match(result.stdout, /Sync check passed/);
+    assert.ok(existsSync(join(tempDir, ".agents/skills/sync-test-skill/SKILL.md")));
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("sync cleans stale files from a previous render", () => {
+  const tempDir = makeTempDir();
+  try {
+    // First render with a skill
+    const specWithSkill = makeMinimalSpec({
+      skills: [makeSkillFixture({ slug: "stale-skill" })],
+    });
+    const specPath = writeSpec(tempDir, specWithSkill);
+    expectSuccess(runCli(["sync", "--spec", specPath, "--target", tempDir]));
+    assert.ok(existsSync(join(tempDir, ".agents/skills/stale-skill/SKILL.md")));
+
+    // Second sync without the skill
+    const specWithoutSkill = makeMinimalSpec({ skills: [] });
+    writeSpec(tempDir, specWithoutSkill);
+    const result = runCli(["sync", "--spec", specPath, "--target", tempDir]);
+    expectSuccess(result);
+    assert.match(result.stdout, /Cleaned stale files/);
+    assert.ok(!existsSync(join(tempDir, ".agents/skills/stale-skill/SKILL.md")), "Stale skill file should be removed");
+    assert.match(result.stdout, /Sync check passed/);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("sync defaults target to current directory", () => {
+  const tempDir = makeTempDir();
+  try {
+    const spec = makeMinimalSpec();
+    const specPath = writeSpec(tempDir, spec);
+    const result = runCli(["sync", "--spec", specPath], { cwd: tempDir });
+    expectSuccess(result);
+    assert.match(result.stdout, /Sync check passed/);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("sync fails when --spec is missing", () => {
+  const result = runCli(["sync"]);
+  expectFailure(result);
+  assert.match(result.stderr, /--spec/);
+});
+
+// ===========================================================================
+// Doctor command tests
+// ===========================================================================
+
+test("doctor reports warnings for unedited base spec", () => {
+  const tempDir = makeTempDir();
+  try {
+    const spec = {
+      schemaVersion: 1,
+      project: {
+        name: "Replace this project name",
+        summary: "Portable AI instruction system generated from one canonical spec.",
+        components: [
+          "Replace this list with the real applications, services, or packages in the repository.",
+        ],
+      },
+      workspaceInstructions: {
+        sections: [{ title: "General rules", rules: ["Keep changes small."] }],
+        validation: [
+          "Document the baseline validation commands for this repository and keep them current.",
+        ],
+      },
+      reviewChecklist: {
+        intro: "Checklist",
+        failureThreshold: 1,
+        items: [{ title: "Check" }],
+      },
+      skills: [],
+    };
+    const specPath = writeSpec(tempDir, spec);
+    const result = runCli(["doctor", "--spec", specPath]);
+    expectFailure(result);
+    assert.match(result.stdout, /\[warning\] project\.name/);
+    assert.match(result.stdout, /\[warning\] project\.components\[0\]/);
+    assert.match(result.stdout, /\[warning\] workspaceInstructions\.validation/);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("doctor passes clean for a well-filled spec", () => {
+  const tempDir = makeTempDir();
+  try {
+    const spec = {
+      schemaVersion: 1,
+      project: {
+        name: "My Real Project",
+        summary: "A real project with actual content.",
+        components: ["api: Express.js REST service", "web: React frontend"],
+      },
+      workspaceInstructions: {
+        sections: [
+          { title: "General rules", rules: ["Keep changes small."] },
+          { title: "API rules", rules: ["Use centralized error handling."] },
+        ],
+        validation: ["npx eslint .", "npx tsc --noEmit", "npx vitest run"],
+      },
+      reviewChecklist: {
+        intro: "Review checklist for real project.",
+        failureThreshold: 2,
+        items: [{ title: "Uses real constraints" }],
+      },
+      skills: [makeSkillFixture()],
+    };
+    const specPath = writeSpec(tempDir, spec);
+    const result = runCli(["doctor", "--spec", specPath]);
+    expectSuccess(result);
+    assert.match(result.stdout, /No issues found/);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("doctor reports info when no skills are defined", () => {
+  const tempDir = makeTempDir();
+  try {
+    const spec = {
+      schemaVersion: 1,
+      project: {
+        name: "Real Project",
+        summary: "Actual project.",
+        components: ["api: Node.js service"],
+      },
+      workspaceInstructions: {
+        sections: [
+          { title: "General rules", rules: ["Keep changes small."] },
+          { title: "Node rules", rules: ["Use Express middleware."] },
+        ],
+        validation: ["npx eslint .", "npx vitest run"],
+      },
+      reviewChecklist: {
+        intro: "Checklist",
+        failureThreshold: 1,
+        items: [{ title: "Check" }],
+      },
+      skills: [],
+    };
+    const specPath = writeSpec(tempDir, spec);
+    const result = runCli(["doctor", "--spec", specPath]);
+    // info-only findings do not cause exit(1)
+    expectSuccess(result);
+    assert.match(result.stdout, /\[info\] skills/);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("doctor reports info for single General rules section", () => {
+  const tempDir = makeTempDir();
+  try {
+    const spec = {
+      schemaVersion: 1,
+      project: {
+        name: "Real Project",
+        summary: "Actual project.",
+        components: ["api: service"],
+      },
+      workspaceInstructions: {
+        sections: [{ title: "General rules", rules: ["Keep changes small."] }],
+        validation: ["npx eslint ."],
+      },
+      reviewChecklist: {
+        intro: "Checklist",
+        failureThreshold: 1,
+        items: [{ title: "Check" }],
+      },
+      skills: [makeSkillFixture()],
+    };
+    const specPath = writeSpec(tempDir, spec);
+    const result = runCli(["doctor", "--spec", specPath]);
+    expectSuccess(result);
+    assert.match(result.stdout, /\[info\] workspaceInstructions\.sections/);
+    assert.match(result.stdout, /Consider adding stack-specific sections/);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("doctor fails when --spec is missing", () => {
+  const result = runCli(["doctor"]);
+  expectFailure(result);
+  assert.match(result.stderr, /--spec/);
+});
+
+test("doctor detects generic validation commands", () => {
+  const tempDir = makeTempDir();
+  try {
+    const spec = {
+      schemaVersion: 1,
+      project: {
+        name: "Real Project",
+        summary: "Actual project.",
+        components: ["api: service"],
+      },
+      workspaceInstructions: {
+        sections: [
+          { title: "General rules", rules: ["Keep changes small."] },
+          { title: "Extra rules", rules: ["Be explicit."] },
+        ],
+        validation: [
+          "Run the repository's lint command.",
+          "Run the repository's build command.",
+        ],
+      },
+      reviewChecklist: {
+        intro: "Checklist",
+        failureThreshold: 1,
+        items: [{ title: "Check" }],
+      },
+      skills: [makeSkillFixture()],
+    };
+    const specPath = writeSpec(tempDir, spec);
+    const result = runCli(["doctor", "--spec", specPath]);
+    expectFailure(result);
+    assert.match(result.stdout, /\[warning\] workspaceInstructions\.validation/);
+    assert.match(result.stdout, /generic/i);
   } finally {
     cleanupTempDir(tempDir);
   }
@@ -2465,6 +2827,892 @@ test("init --guided copies introspection and interactive modules to target", () 
       "introspection.mjs should be copied");
     assert.ok(existsSync(join(tempDir, "docs/agent-jump-start/lib/interactive.mjs")),
       "interactive.mjs should be copied");
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+// ===========================================================================
+// update-skills tests
+// ===========================================================================
+
+function makeSkillMdDir(parentDir, slug, version, ruleText) {
+  const skillDir = join(parentDir, slug);
+  mkdirSync(skillDir, { recursive: true });
+  writeFileSync(join(skillDir, "SKILL.md"), `---
+name: ${slug}
+description: Skill ${slug} for testing update-skills.
+metadata:
+  version: "${version}"
+  author: test-author
+---
+# ${slug}
+
+## Rules
+
+- ${ruleText}
+`, "utf8");
+  return skillDir;
+}
+
+test("update-skills reports up-to-date when source has not changed", () => {
+  const tempDir = makeTempDir();
+  try {
+    const specPath = join(tempDir, "spec.yaml");
+    expectSuccess(runCli(["bootstrap", "--base", "specs/base-spec.yaml", "--output", specPath]));
+
+    const skillDir = makeSkillMdDir(tempDir, "stable-skill", "1.0.0", "Keep things stable.");
+    expectSuccess(runCli(["import-skill", "--spec", specPath, "--skill", skillDir]));
+
+    const result = runCli(["update-skills", "--spec", specPath]);
+    expectSuccess(result);
+    assert.match(result.stdout, /1 up-to-date/);
+    assert.match(result.stdout, /0 updated/);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("update-skills detects changed source and applies update", () => {
+  const tempDir = makeTempDir();
+  try {
+    const specPath = join(tempDir, "spec.yaml");
+    expectSuccess(runCli(["bootstrap", "--base", "specs/base-spec.yaml", "--output", specPath]));
+
+    const skillDir = makeSkillMdDir(tempDir, "evolving-skill", "1.0.0", "Original rule.");
+    expectSuccess(runCli(["import-skill", "--spec", specPath, "--skill", skillDir]));
+
+    const lockBefore = readLockfile(tempDir);
+    const checksumBefore = lockBefore.skills.find((s) => s.slug === "evolving-skill").checksum;
+
+    // Modifica la skill upstream
+    writeFileSync(join(skillDir, "SKILL.md"), `---
+name: evolving-skill
+description: Skill evolving-skill for testing update-skills.
+metadata:
+  version: "2.0.0"
+  author: test-author
+---
+# evolving-skill
+
+## Rules
+
+- Updated rule with more content.
+- A brand new rule.
+`, "utf8");
+
+    const result = runCli(["update-skills", "--spec", specPath]);
+    expectSuccess(result);
+    assert.match(result.stdout, /evolving-skill/);
+    assert.match(result.stdout, /1\.0\.0.*2\.0\.0/);
+    assert.match(result.stdout, /1 updated/);
+
+    // Il lockfile deve avere un checksum aggiornato
+    const lockAfter = readLockfile(tempDir);
+    const checksumAfter = lockAfter.skills.find((s) => s.slug === "evolving-skill").checksum;
+    assert.notEqual(checksumAfter, checksumBefore, "Checksum should change after update");
+
+    // La spec deve contenere la skill v2
+    const spec = JSON.parse(readFileSync(specPath, "utf8"));
+    const skill = spec.skills.find((s) => s.slug === "evolving-skill");
+    assert.equal(skill.version, "2.0.0");
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("update-skills --dry-run does not modify files", () => {
+  const tempDir = makeTempDir();
+  try {
+    const specPath = join(tempDir, "spec.yaml");
+    expectSuccess(runCli(["bootstrap", "--base", "specs/base-spec.yaml", "--output", specPath]));
+
+    const skillDir = makeSkillMdDir(tempDir, "preview-skill", "1.0.0", "Rule before.");
+    expectSuccess(runCli(["import-skill", "--spec", specPath, "--skill", skillDir]));
+
+    const specContentBefore = readFileSync(specPath, "utf8");
+    const lockBefore = readFileSync(join(tempDir, "agent-jump-start.lock.json"), "utf8");
+
+    // Modifica la skill upstream
+    writeFileSync(join(skillDir, "SKILL.md"), `---
+name: preview-skill
+description: Skill preview-skill for testing update-skills.
+metadata:
+  version: "2.0.0"
+  author: test-author
+---
+# preview-skill
+
+## Rules
+
+- Completely new rule.
+`, "utf8");
+
+    const result = runCli(["update-skills", "--spec", specPath, "--dry-run"]);
+    expectSuccess(result);
+    assert.match(result.stdout, /Dry-run/);
+    assert.match(result.stdout, /would change/);
+
+    // Nessun file deve essere cambiato
+    assert.equal(readFileSync(specPath, "utf8"), specContentBefore);
+    assert.equal(readFileSync(join(tempDir, "agent-jump-start.lock.json"), "utf8"), lockBefore);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("update-skills warns on unreachable source without failing", () => {
+  const tempDir = makeTempDir();
+  try {
+    const specPath = join(tempDir, "spec.yaml");
+    expectSuccess(runCli(["bootstrap", "--base", "specs/base-spec.yaml", "--output", specPath]));
+
+    const skillDir = makeSkillMdDir(tempDir, "vanishing-skill", "1.0.0", "I will vanish.");
+    expectSuccess(runCli(["import-skill", "--spec", specPath, "--skill", skillDir]));
+
+    // Rimuovi la sorgente
+    rmSync(skillDir, { recursive: true, force: true });
+
+    const result = runCli(["update-skills", "--spec", specPath]);
+    expectSuccess(result);
+    assert.match(result.stdout, /[Uu]nreachable/);
+    assert.match(result.stdout, /vanishing-skill/);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("update-skills --skill filters to a single skill", () => {
+  const tempDir = makeTempDir();
+  try {
+    const specPath = join(tempDir, "spec.yaml");
+    expectSuccess(runCli(["bootstrap", "--base", "specs/base-spec.yaml", "--output", specPath]));
+
+    const skillA = makeSkillMdDir(tempDir, "skill-a", "1.0.0", "Rule A.");
+    const skillB = makeSkillMdDir(tempDir, "skill-b", "1.0.0", "Rule B.");
+    expectSuccess(runCli(["import-skill", "--spec", specPath, "--skill", skillA]));
+    expectSuccess(runCli(["import-skill", "--spec", specPath, "--skill", skillB]));
+
+    // Modifica solo skill-b
+    writeFileSync(join(skillB, "SKILL.md"), `---
+name: skill-b
+description: Skill skill-b for testing update-skills.
+metadata:
+  version: "2.0.0"
+  author: test-author
+---
+# skill-b
+
+## Rules
+
+- Updated rule B.
+`, "utf8");
+
+    const result = runCli(["update-skills", "--spec", specPath, "--skill", "skill-b"]);
+    expectSuccess(result);
+    assert.match(result.stdout, /skill-b/);
+    assert.match(result.stdout, /1 updated/);
+    assert.doesNotMatch(result.stdout, /skill-a/);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("update-skills exits non-zero when refresh reports internal errors", () => {
+  const tempDir = makeTempDir();
+  try {
+    const specPath = writeSpec(tempDir, makeMinimalSpec({ skills: [] }));
+    writeFileSync(join(tempDir, "agent-jump-start.lock.json"), `${JSON.stringify({
+      schemaVersion: 1,
+      generatedBy: "Agent Jump Start vtest",
+      skills: [
+        {
+          slug: "broken-skill",
+          version: "1.0.0",
+          sourceType: "unsupported-provider",
+          source: "broken-source",
+          checksum: "sha256:test",
+          importedAt: "2026-04-09T00:00:00.000Z",
+        },
+      ],
+    }, null, 2)}\n`, "utf8");
+
+    const result = runCli(["update-skills", "--spec", specPath]);
+    expectFailure(result);
+    assert.match(result.stdout, /Errors:/);
+    assert.match(result.stdout, /broken-skill/);
+    assert.match(result.stdout, /1 error/);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+// ===========================================================================
+// Layered specs — mergeByKey unit tests
+// ===========================================================================
+
+test("mergeByKey: overlay replaces base entry by key and appends new entries", () => {
+  const base = [
+    { title: "General rules", rules: ["Rule A"] },
+    { title: "React rules", rules: ["Rule B"] },
+  ];
+  const overlay = [
+    { title: "General rules", rules: ["Rule A replaced"] },
+    { title: "Python rules", rules: ["Rule C"] },
+  ];
+  const result = mergeByKey(base, overlay, "title");
+
+  assert.equal(result.length, 3);
+  assert.deepEqual(result[0], { title: "General rules", rules: ["Rule A replaced"] });
+  assert.deepEqual(result[1], { title: "React rules", rules: ["Rule B"] });
+  assert.deepEqual(result[2], { title: "Python rules", rules: ["Rule C"] });
+});
+
+test("mergeByKey: empty overlay returns clone of base", () => {
+  const base = [{ slug: "a", value: 1 }];
+  const result = mergeByKey(base, [], "slug");
+  assert.deepEqual(result, base);
+  assert.notEqual(result[0], base[0]); // deve essere un clone
+});
+
+test("mergeByKey: empty base returns clone of overlay", () => {
+  const overlay = [{ slug: "b", value: 2 }];
+  const result = mergeByKey([], overlay, "slug");
+  assert.deepEqual(result, overlay);
+});
+
+test("mergeByKey: null base returns clone of overlay", () => {
+  const overlay = [{ slug: "c" }];
+  const result = mergeByKey(null, overlay, "slug");
+  assert.deepEqual(result, overlay);
+});
+
+// ===========================================================================
+// Layered specs — mergeSpecLayers unit tests
+// ===========================================================================
+
+test("mergeSpecLayers: overlay scalars replace base scalars", () => {
+  const base = makeMinimalSpec();
+  const overlay = {
+    project: { name: "Override Name", summary: "Override summary" },
+  };
+  const merged = mergeSpecLayers(base, overlay);
+
+  assert.equal(merged.project.name, "Override Name");
+  assert.equal(merged.project.summary, "Override summary");
+  assert.equal(merged.schemaVersion, 1);
+});
+
+test("mergeSpecLayers: overlay components replace entire array", () => {
+  const base = makeMinimalSpec();
+  base.project.components = ["comp-a"];
+  const overlay = {
+    project: { components: ["comp-b", "comp-c"] },
+  };
+  const merged = mergeSpecLayers(base, overlay);
+  assert.deepEqual(merged.project.components, ["comp-b", "comp-c"]);
+});
+
+test("mergeSpecLayers: sections use append+replace by title", () => {
+  const base = makeMinimalSpec();
+  base.workspaceInstructions.sections = [
+    { title: "General rules", rules: ["Rule A"] },
+    { title: "React rules", rules: ["Rule B"] },
+  ];
+  const overlay = {
+    workspaceInstructions: {
+      sections: [
+        { title: "General rules", rules: ["Rule A v2"] },
+        { title: "Python rules", rules: ["Rule P"] },
+      ],
+    },
+  };
+  const merged = mergeSpecLayers(base, overlay);
+
+  assert.equal(merged.workspaceInstructions.sections.length, 3);
+  assert.equal(merged.workspaceInstructions.sections[0].title, "General rules");
+  assert.deepEqual(merged.workspaceInstructions.sections[0].rules, ["Rule A v2"]);
+  assert.equal(merged.workspaceInstructions.sections[1].title, "React rules");
+  assert.equal(merged.workspaceInstructions.sections[2].title, "Python rules");
+});
+
+test("mergeSpecLayers: validation replaces entire array", () => {
+  const base = makeMinimalSpec();
+  const overlay = {
+    workspaceInstructions: { validation: ["pytest", "mypy"] },
+  };
+  const merged = mergeSpecLayers(base, overlay);
+  assert.deepEqual(merged.workspaceInstructions.validation, ["pytest", "mypy"]);
+});
+
+test("mergeSpecLayers: reviewChecklist replaces entire object", () => {
+  const base = makeMinimalSpec();
+  const newChecklist = {
+    intro: "New checklist",
+    failureThreshold: 3,
+    items: [{ title: "Item X" }],
+  };
+  const overlay = { reviewChecklist: newChecklist };
+  const merged = mergeSpecLayers(base, overlay);
+  assert.deepEqual(merged.reviewChecklist, newChecklist);
+});
+
+test("mergeSpecLayers: skills use append+replace by slug", () => {
+  const base = makeMinimalSpec({ skills: [makeSkillFixture({ slug: "alpha" })] });
+  const newSkill = makeSkillFixture({ slug: "beta", title: "Beta Skill" });
+  const replacedAlpha = makeSkillFixture({ slug: "alpha", title: "Alpha Replaced" });
+  const overlay = { skills: [replacedAlpha, newSkill] };
+  const merged = mergeSpecLayers(base, overlay);
+
+  assert.equal(merged.skills.length, 2);
+  assert.equal(merged.skills[0].slug, "alpha");
+  assert.equal(merged.skills[0].title, "Alpha Replaced");
+  assert.equal(merged.skills[1].slug, "beta");
+});
+
+test("mergeSpecLayers: absent overlay fields do not alter base", () => {
+  const base = makeMinimalSpec({ skills: [makeSkillFixture()] });
+  const overlay = {};
+  const merged = mergeSpecLayers(base, overlay);
+  assert.deepEqual(merged, base);
+});
+
+// ===========================================================================
+// Layered specs — resolveLayeredSpec integration tests
+// ===========================================================================
+
+test("resolveLayeredSpec: single spec without extends returns itself", () => {
+  const tempDir = makeTempDir();
+  try {
+    const specPath = writeSpec(tempDir, makeMinimalSpec());
+    const resolved = resolveLayeredSpec(specPath);
+    assert.equal(resolved.project.name, "Test");
+    assert.equal(resolved.schemaVersion, 1);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("resolveLayeredSpec: two-layer extends chain merges correctly", () => {
+  const tempDir = makeTempDir();
+  try {
+    const base = makeMinimalSpec();
+    base.workspaceInstructions.sections = [
+      { title: "General rules", rules: ["Base rule"] },
+    ];
+    writeSpec(tempDir, base, "base.yaml");
+
+    const overlay = {
+      extends: "./base.yaml",
+      project: { name: "Overlay Project" },
+      workspaceInstructions: {
+        sections: [
+          { title: "General rules", rules: ["Overlay rule"] },
+          { title: "Extra section", rules: ["Extra rule"] },
+        ],
+      },
+    };
+    const overlayPath = writeSpec(tempDir, overlay, "overlay.yaml");
+
+    const resolved = resolveLayeredSpec(overlayPath);
+
+    assert.equal(resolved.project.name, "Overlay Project");
+    assert.equal(resolved.project.summary, "Test spec");
+    assert.equal(resolved.workspaceInstructions.sections.length, 2);
+    assert.deepEqual(resolved.workspaceInstructions.sections[0].rules, ["Overlay rule"]);
+    assert.equal(resolved.workspaceInstructions.sections[1].title, "Extra section");
+    assert.equal(resolved.extends, undefined);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("resolveLayeredSpec: three-layer chain merges in correct order", () => {
+  const tempDir = makeTempDir();
+  try {
+    const root = makeMinimalSpec();
+    root.project.name = "Root";
+    writeSpec(tempDir, root, "root.yaml");
+
+    const mid = {
+      extends: "./root.yaml",
+      project: { name: "Mid" },
+      workspaceInstructions: {
+        sections: [{ title: "Mid section", rules: ["Mid rule"] }],
+      },
+    };
+    writeSpec(tempDir, mid, "mid.yaml");
+
+    const leaf = {
+      extends: "./mid.yaml",
+      project: { name: "Leaf" },
+    };
+    const leafPath = writeSpec(tempDir, leaf, "leaf.yaml");
+
+    const resolved = resolveLayeredSpec(leafPath);
+
+    assert.equal(resolved.project.name, "Leaf");
+    // Mid section dovrebbe essere presente (ereditata dal layer intermedio)
+    const midSection = resolved.workspaceInstructions.sections.find(
+      (s) => s.title === "Mid section",
+    );
+    assert.ok(midSection, "Mid section should be inherited");
+    assert.deepEqual(midSection.rules, ["Mid rule"]);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("resolveLayeredSpec: circular extends throws", () => {
+  const tempDir = makeTempDir();
+  try {
+    const specA = { extends: "./b.yaml", project: { name: "A" } };
+    const specB = { extends: "./a.yaml", project: { name: "B" } };
+    writeSpec(tempDir, specA, "a.yaml");
+    writeSpec(tempDir, specB, "b.yaml");
+
+    assert.throws(
+      () => resolveLayeredSpec(join(tempDir, "a.yaml")),
+      /[Cc]ircular/,
+    );
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("resolveLayeredSpec: missing base file throws", () => {
+  const tempDir = makeTempDir();
+  try {
+    const overlay = { extends: "./nonexistent.yaml", project: { name: "X" } };
+    const overlayPath = writeSpec(tempDir, overlay, "overlay.yaml");
+
+    assert.throws(
+      () => resolveLayeredSpec(overlayPath),
+      /ENOENT|no such file/i,
+    );
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+// ===========================================================================
+// Layered specs — CLI integration tests
+// ===========================================================================
+
+test("CLI sync works with a layered overlay spec", () => {
+  const tempDir = makeTempDir();
+  try {
+    const base = makeMinimalSpec();
+    writeSpec(tempDir, base, "base.yaml");
+
+    const overlay = {
+      extends: "./base.yaml",
+      project: { name: "Overlay via CLI" },
+    };
+    const overlayPath = writeSpec(tempDir, overlay, "overlay.yaml");
+
+    const result = runCli(["sync", "--spec", overlayPath, "--target", tempDir]);
+    expectSuccess(result);
+    assert.match(result.stdout, /Rendered files:/);
+
+    // Il Cursor MDC generato deve contenere il nome dell'overlay
+    const cursorContent = readFileSync(join(tempDir, ".cursor", "rules", "agent-instructions.mdc"), "utf8");
+    assert.match(cursorContent, /Overlay via CLI/);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("CLI validate passes on merged overlay", () => {
+  const tempDir = makeTempDir();
+  try {
+    const base = makeMinimalSpec();
+    writeSpec(tempDir, base, "base.yaml");
+
+    const overlay = {
+      extends: "./base.yaml",
+      project: { name: "Valid Overlay" },
+      workspaceInstructions: {
+        sections: [{ title: "New section", rules: ["A rule"] }],
+      },
+    };
+    const overlayPath = writeSpec(tempDir, overlay, "overlay.yaml");
+
+    const result = runCli(["validate", "--spec", overlayPath]);
+    expectSuccess(result);
+    assert.match(result.stdout, /validation passed/);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("CLI render with overlay produces correct output", () => {
+  const tempDir = makeTempDir();
+  try {
+    const base = makeMinimalSpec();
+    base.workspaceInstructions.sections = [
+      { title: "General rules", rules: ["Base general rule"] },
+    ];
+    writeSpec(tempDir, base, "base.yaml");
+
+    const overlay = {
+      extends: "./base.yaml",
+      project: { name: "Rendered Overlay" },
+      workspaceInstructions: {
+        sections: [{ title: "Python rules", rules: ["Use type hints"] }],
+      },
+    };
+    const overlayPath = writeSpec(tempDir, overlay, "overlay.yaml");
+
+    const result = runCli(["render", "--spec", overlayPath, "--target", tempDir]);
+    expectSuccess(result);
+
+    // Il contenuto generato deve avere sia la base section che quella nuova
+    const copilotContent = readFileSync(
+      join(tempDir, ".github", "copilot-instructions.md"),
+      "utf8",
+    );
+    assert.match(copilotContent, /General rules/);
+    assert.match(copilotContent, /Python rules/);
+    assert.match(copilotContent, /Use type hints/);
+
+    // Il Cursor MDC contiene il project name dell'overlay
+    const cursorContent = readFileSync(
+      join(tempDir, ".cursor", "rules", "agent-instructions.mdc"),
+      "utf8",
+    );
+    assert.match(cursorContent, /Rendered Overlay/);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+// ===========================================================================
+// Layered specs — export-skill with overlay
+// ===========================================================================
+
+test("export-skill works on a layered overlay spec", () => {
+  const tempDir = makeTempDir();
+  try {
+    const skill = makeSkillFixture({ slug: "layered-export-test" });
+    const base = makeMinimalSpec({ skills: [skill] });
+    writeSpec(tempDir, base, "base.yaml");
+
+    const overlay = {
+      extends: "./base.yaml",
+      project: { name: "Export Overlay" },
+    };
+    const overlayPath = writeSpec(tempDir, overlay, "overlay.yaml");
+
+    const outputDir = join(tempDir, "exported");
+    const result = runCli([
+      "export-skill", "--spec", overlayPath,
+      "--slug", "layered-export-test",
+      "--output", outputDir,
+    ]);
+    expectSuccess(result);
+    assert.match(result.stdout, /layered-export-test/);
+    assert.ok(existsSync(join(outputDir, "SKILL.md")));
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+// ===========================================================================
+// mergeByKey — fail-fast validation
+// ===========================================================================
+
+test("mergeByKey: throws on overlay entry missing key field", () => {
+  const base = [{ slug: "a", name: "A" }];
+  const overlay = [{ name: "No slug" }];
+
+  assert.throws(
+    () => mergeByKey(base, overlay, "slug"),
+    /missing required key field "slug"/,
+  );
+});
+
+test("mergeByKey: throws on duplicate key in overlay array", () => {
+  const base = [{ slug: "a", name: "A" }];
+  const overlay = [
+    { slug: "b", name: "B1" },
+    { slug: "b", name: "B2" },
+  ];
+
+  assert.throws(
+    () => mergeByKey(base, overlay, "slug"),
+    /[Dd]uplicate.*"slug".*"b"/,
+  );
+});
+
+test("mergeByKey: throws on base entry missing key field", () => {
+  const base = [{ name: "No slug" }];
+  const overlay = [{ slug: "a", name: "A" }];
+
+  assert.throws(
+    () => mergeByKey(base, overlay, "slug"),
+    /missing required key field "slug"/,
+  );
+});
+
+test("mergeByKey: valid inputs still merge correctly after hardening", () => {
+  const base = [
+    { slug: "a", name: "A" },
+    { slug: "b", name: "B" },
+  ];
+  const overlay = [
+    { slug: "b", name: "B-override" },
+    { slug: "c", name: "C-new" },
+  ];
+
+  const result = mergeByKey(base, overlay, "slug");
+  assert.equal(result.length, 3);
+  assert.equal(result[0].name, "A");
+  assert.equal(result[1].name, "B-override");
+  assert.equal(result[2].name, "C-new");
+});
+
+// ===========================================================================
+// Writeback semantics — layered spec side-effect isolation
+// ===========================================================================
+
+test("resolveLayeredSpecWithMeta returns leaf metadata alongside merged spec", () => {
+  const tempDir = makeTempDir();
+  try {
+    const base = makeMinimalSpec({
+      skills: [makeSkillFixture({ slug: "base-skill" })],
+    });
+    writeSpec(tempDir, base, "base.yaml");
+
+    const overlay = {
+      extends: "./base.yaml",
+      project: { name: "Overlay Project" },
+      skills: [makeSkillFixture({ slug: "leaf-skill" })],
+    };
+    const overlayPath = writeSpec(tempDir, overlay, "overlay.yaml");
+
+    const meta = resolveLayeredSpecWithMeta(overlayPath);
+
+    // merged contains skills from both layers
+    assert.equal(meta.merged.project.name, "Overlay Project");
+    const mergedSlugs = meta.merged.skills.map((s) => s.slug);
+    assert.ok(mergedSlugs.includes("base-skill"), "merged should include base skill");
+    assert.ok(mergedSlugs.includes("leaf-skill"), "merged should include leaf skill");
+
+    // leafSpec contains only the leaf's own fields (no base skills)
+    const leafSlugs = (meta.leafSpec.skills ?? []).map((s) => s.slug);
+    assert.ok(leafSlugs.includes("leaf-skill"), "leaf should include its own skill");
+    assert.ok(!leafSlugs.includes("base-skill"), "leaf should NOT include base skill");
+
+    // metadata
+    assert.ok(meta.isLayered);
+    assert.equal(meta.chain.length, 2);
+    assert.equal(meta.leafPath, resolve(overlayPath));
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("import-skill on overlay spec preserves extends and does not flatten base", () => {
+  const tempDir = makeTempDir();
+  try {
+    // Base spec with one skill
+    const base = makeMinimalSpec({
+      skills: [makeSkillFixture({ slug: "base-only-skill" })],
+    });
+    writeSpec(tempDir, base, "base.yaml");
+
+    // Overlay that extends base — starts with no skills of its own
+    const overlay = {
+      extends: "./base.yaml",
+      project: { name: "Overlay" },
+    };
+    const overlayPath = writeSpec(tempDir, overlay, "overlay.yaml");
+
+    // Build a standalone skill directory to import
+    const skillDir = join(tempDir, "ext-skill");
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(
+      join(skillDir, "SKILL.md"),
+      [
+        "---",
+        'name: "imported-skill"',
+        'description: "A skill imported into the overlay"',
+        "---",
+        "",
+        "# Imported Skill",
+        "",
+        "Some content.",
+      ].join("\n"),
+      "utf8",
+    );
+
+    // Import the skill into the overlay
+    const result = runCli([
+      "import-skill", "--spec", overlayPath, "--skill", skillDir,
+    ]);
+    expectSuccess(result);
+    assert.match(result.stdout, /Added.*imported-skill/);
+
+    // Read back the overlay file from disk
+    const writtenOverlay = JSON.parse(readFileSync(overlayPath, "utf8"));
+
+    // extends must be preserved
+    assert.equal(writtenOverlay.extends, "./base.yaml",
+      "extends field must survive writeback");
+
+    // The overlay must NOT contain base-layer fields like schemaVersion
+    // or the base skill — only its own additions.
+    assert.equal(writtenOverlay.schemaVersion, undefined,
+      "schemaVersion belongs to the base, not the overlay");
+
+    // The overlay skills array must contain only the imported skill
+    const overlaySlugs = (writtenOverlay.skills ?? []).map((s) => s.slug);
+    assert.ok(overlaySlugs.includes("imported-skill"),
+      "imported skill should be in the overlay");
+    assert.ok(!overlaySlugs.includes("base-only-skill"),
+      "base skill must NOT leak into the overlay file");
+
+    // The resolved spec should see all skills (base + overlay)
+    const resolved = resolveLayeredSpec(overlayPath);
+    const resolvedSlugs = resolved.skills.map((s) => s.slug);
+    assert.ok(resolvedSlugs.includes("base-only-skill"),
+      "resolved spec should include base skill");
+    assert.ok(resolvedSlugs.includes("imported-skill"),
+      "resolved spec should include imported skill");
+
+    // The base file must be untouched
+    const baseAfter = JSON.parse(readFileSync(join(tempDir, "base.yaml"), "utf8"));
+    const baseSlugs = baseAfter.skills.map((s) => s.slug);
+    assert.ok(baseSlugs.includes("base-only-skill"));
+    assert.ok(!baseSlugs.includes("imported-skill"),
+      "base file must NOT be modified by import into overlay");
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("import-skill detects collision with base-layer skill via resolved lookup", () => {
+  const tempDir = makeTempDir();
+  try {
+    const base = makeMinimalSpec({
+      skills: [makeSkillFixture({ slug: "shared-skill" })],
+    });
+    writeSpec(tempDir, base, "base.yaml");
+
+    const overlay = {
+      extends: "./base.yaml",
+      project: { name: "Overlay" },
+    };
+    const overlayPath = writeSpec(tempDir, overlay, "overlay.yaml");
+
+    // Build a skill with the same slug as the base skill
+    const skillDir = join(tempDir, "clash-skill");
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(
+      join(skillDir, "SKILL.md"),
+      [
+        "---",
+        'name: "shared-skill"',
+        'description: "Collides with base"',
+        "---",
+        "",
+        "# Shared Skill",
+        "",
+        "Override content.",
+      ].join("\n"),
+      "utf8",
+    );
+
+    // Without --replace, should skip because it exists in the base
+    const result = runCli([
+      "import-skill", "--spec", overlayPath, "--skill", skillDir,
+    ]);
+    expectSuccess(result);
+    assert.match(result.stdout, /Skipped.*shared-skill/,
+      "Should detect collision with base-layer skill");
+
+    // With --replace, should materialize the override in the leaf
+    const replaceResult = runCli([
+      "import-skill", "--spec", overlayPath, "--skill", skillDir, "--replace",
+    ]);
+    expectSuccess(replaceResult);
+    assert.match(replaceResult.stdout, /Replaced.*shared-skill/);
+
+    const writtenOverlay = JSON.parse(readFileSync(overlayPath, "utf8"));
+    assert.equal(writtenOverlay.extends, "./base.yaml");
+    const overlaySlugs = (writtenOverlay.skills ?? []).map((s) => s.slug);
+    assert.ok(overlaySlugs.includes("shared-skill"),
+      "override should be materialized in the leaf");
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("resolveLayeredSpecWithMeta: single spec without extends reports isLayered false", () => {
+  const tempDir = makeTempDir();
+  try {
+    const spec = makeMinimalSpec();
+    const specPath = writeSpec(tempDir, spec);
+
+    const meta = resolveLayeredSpecWithMeta(specPath);
+    assert.equal(meta.isLayered, false);
+    assert.equal(meta.chain.length, 1);
+    assert.deepEqual(meta.merged.project, spec.project);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("update-skills on overlay spec preserves extends and writes only to the leaf", () => {
+  const tempDir = makeTempDir();
+  try {
+    const base = makeMinimalSpec({
+      skills: [makeSkillFixture({ slug: "inherited-skill", version: "1.0.0" })],
+    });
+    writeSpec(tempDir, base, "base.yaml");
+
+    const overlay = {
+      extends: "./base.yaml",
+      project: { name: "Overlay" },
+    };
+    const overlayPath = writeSpec(tempDir, overlay, "overlay.yaml");
+
+    const skillDir = makeSkillMdDir(
+      tempDir,
+      "inherited-skill",
+      "2.0.0",
+      "Updated rule from overlay refresh.",
+    );
+
+    writeFileSync(join(tempDir, "agent-jump-start.lock.json"), `${JSON.stringify({
+      schemaVersion: 1,
+      generatedBy: "Agent Jump Start vtest",
+      skills: [
+        {
+          slug: "inherited-skill",
+          version: "1.0.0",
+          sourceType: "local-directory",
+          source: "./inherited-skill",
+          resolvedFrom: "./inherited-skill",
+          checksum: "sha256:bogus",
+          importedAt: "2026-04-09T00:00:00.000Z",
+        },
+      ],
+    }, null, 2)}\n`, "utf8");
+
+    const result = runCli(["update-skills", "--spec", overlayPath]);
+    expectSuccess(result);
+    assert.match(result.stdout, /Updated:/);
+    assert.match(result.stdout, /inherited-skill/);
+
+    const writtenOverlay = JSON.parse(readFileSync(overlayPath, "utf8"));
+    assert.equal(writtenOverlay.extends, "./base.yaml");
+    assert.equal(writtenOverlay.schemaVersion, undefined);
+    assert.ok((writtenOverlay.skills ?? []).some((s) => s.slug === "inherited-skill"));
+
+    const baseAfter = JSON.parse(readFileSync(join(tempDir, "base.yaml"), "utf8"));
+    assert.equal(baseAfter.skills[0].version, "1.0.0");
   } finally {
     cleanupTempDir(tempDir);
   }

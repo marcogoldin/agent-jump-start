@@ -129,36 +129,52 @@ Open `docs/agent-jump-start/canonical-spec.yaml` and fill in:
 
 The spec uses a strict YAML subset that is also valid JSON and can be parsed with `JSON.parse`, keeping the generator zero-dependency.
 
-### 2. Render all outputs
+### 2. Sync
 
 ```bash
-agent-jump-start render \
-  --spec docs/agent-jump-start/canonical-spec.yaml \
-  --target . --clean
+agent-jump-start sync \
+  --spec docs/agent-jump-start/canonical-spec.yaml
 ```
 
-Use `--clean` to remove stale generated files when the spec changes.
+`sync` is the recommended maintenance command. It renders all outputs, removes stale files, and verifies synchronization in one step. It replaces the manual `render --clean` + `check` sequence.
 
-### 3. Verify synchronization
+### 3. Diagnose weak or incomplete content
 
 ```bash
-agent-jump-start check \
-  --spec docs/agent-jump-start/canonical-spec.yaml \
-  --target .
+agent-jump-start doctor \
+  --spec docs/agent-jump-start/canonical-spec.yaml
 ```
 
-Exits with code `1` when generated files drift from the spec. Use this in CI.
+`doctor` inspects the spec for placeholder text, generic validation commands, missing components, and other signs that the setup is still scaffolded rather than production-ready. Exits with code `1` when warnings are found.
 
 ### 4. Commit
 
 ```bash
 git add docs/agent-jump-start/canonical-spec.yaml \
+  docs/agent-jump-start/agent-jump-start.lock.json \
   .agents/ .claude/ .github/ .cursor/ .roo/ .continue/ \
   AGENTS.md CLAUDE.md .windsurfrules .clinerules CONVENTIONS.md \
   docs/agent-review-checklist.md
 
 git commit -m "sync: update agent instructions from canonical spec"
 ```
+
+## Layered Specs Status
+
+`extends`-based layered specs are the current scaling priority and are under active development.
+
+What works now:
+
+- resolve overlays for `sync`, `doctor`, `render`, `check`, `validate`, `export-skill`, and `update-skills`
+- keep merge behavior explicit and deterministic instead of relying on generic deep merge
+- fail fast on malformed keyed overlay arrays instead of normalizing them silently
+- preserve `extends` during write workflows by writing only to the raw leaf spec for `import-skill` and `update-skills`
+
+Current limitation:
+
+- layered specs should still be treated as maturing until monorepo governance rules are explicit, especially for ownership policy, subtree boundaries, and when leaf materialization is preferred over base-layer mutation
+
+For the current implementation priority and hardening criteria, see `docs/implementation-prompts/agent-jump-start-roadmap.md`.
 
 ## Skill Packages
 
@@ -188,6 +204,8 @@ Supported import sources:
 - An installed skill package (e.g. `.agents/skills/python-pro/`)
 - A standalone `SKILL.md` file
 - A legacy JSON skill file
+
+Each successful `import-skill` run also updates `agent-jump-start.lock.json` next to the spec. The lockfile records the imported skill slug, version, checksum, source, and resolved path so future refresh workflows can be audited and reproduced safely.
 
 ### Add a skill from a higher-level source
 
@@ -235,6 +253,29 @@ Notes:
 - `skills:` and `skillfish:` adapters require `npx` on `PATH`.
 - GitHub sources require `git` on `PATH`.
 - If a third-party tool already wrote a skill into `./.agents/skills/`, import that path into the spec so it becomes managed by Agent Jump Start.
+- Successful `add-skill` imports also update `agent-jump-start.lock.json` next to the spec with provenance metadata for each imported skill.
+
+### Refresh imported skills
+
+Use `update-skills` to re-resolve imported skills from the provenance lockfile, compare upstream checksums, and refresh the canonical spec only when the source changed.
+
+```bash
+# Preview what would change
+agent-jump-start update-skills \
+  --spec docs/agent-jump-start/canonical-spec.yaml \
+  --dry-run
+
+# Refresh every tracked skill
+agent-jump-start update-skills \
+  --spec docs/agent-jump-start/canonical-spec.yaml
+
+# Refresh only one tracked skill
+agent-jump-start update-skills \
+  --spec docs/agent-jump-start/canonical-spec.yaml \
+  --skill python-pro
+```
+
+`update-skills` uses `agent-jump-start.lock.json` as the provenance source of truth. It exits non-zero when a tracked skill cannot be re-resolved cleanly, warns and skips unreachable sources, and updates the spec plus lockfile only when a refresh actually succeeds.
 
 ### Validate a skill before import
 
@@ -310,6 +351,7 @@ CLAUDE.md
 CONVENTIONS.md
 docs/agent-review-checklist.md
 docs/agent-jump-start/generated-manifest.json
+docs/agent-jump-start/agent-jump-start.lock.json
 ```
 
 ## Minimal Spec Example
@@ -367,6 +409,8 @@ agent-jump-start list-profiles
 
 agent-jump-start init [--guided] [--profile <path>] [--target <path>]
 agent-jump-start bootstrap --base <path> [--profile <path>] [--output <path>]
+agent-jump-start sync --spec <path> [--target <path>]
+agent-jump-start doctor --spec <path>
 agent-jump-start render --spec <path> [--target <path>] [--clean]
 agent-jump-start check --spec <path> [--target <path>]
 agent-jump-start validate --spec <path>
@@ -375,6 +419,7 @@ agent-jump-start validate-skill <path>
 agent-jump-start import-skill --spec <path> --skill <path> [--replace]
 agent-jump-start add-skill <source> --spec <path> [--skill <name>] [--replace] [--provider <name>]
 agent-jump-start export-skill --spec <path> --slug <name> --output <path>
+agent-jump-start update-skills --spec <path> [--skill <slug>] [--dry-run]
 agent-jump-start export-schema [--output <path>]
 ```
 
@@ -390,9 +435,9 @@ agent-jump-start export-schema --output canonical-spec.schema.json
 
 ## Current Limitations
 
-- Monorepo overlays and lockfiles are not implemented.
+- Layered specs (`extends`) are functional and write-safe for current workflows, but monorepo governance and ownership policy are not fully defined yet.
 - Continue, Aider, Windsurf, Cline, and Roo Code do not receive native skill packages; they receive mirrored workspace guidance plus inline skill summaries.
-- Remote skill import is currently limited to GitHub sources plus `skills` and `skillfish` adapters. Generic registries and provenance lockfiles are not implemented yet.
+- Remote skill import is currently limited to GitHub sources plus `skills` and `skillfish` adapters. Generic registries are not implemented yet.
 - Skills installed directly by third-party CLIs into `./.agents/skills/` remain unmanaged until they are imported into the canonical spec.
 - Direct `npx @marcogoldin/agent-jump-start@latest ...` execution may not resolve the published bin consistently across npm environments; global install and vendored usage are the most reliable paths today.
 
@@ -414,7 +459,7 @@ and reimplement the renderer elsewhere.
 npm test
 ```
 
-85 tests covering core workflows, guided onboarding, project introspection, skill import/export, progressive disclosure, high-level source adapters, semantic classification, mirror sync integrity, and round-trip stability.
+132 tests covering core workflows, sync command, doctor diagnostics, layered specs, writeback semantics, guided onboarding, project introspection, skill import/export, provenance lockfiles, `update-skills` refresh flows, progressive disclosure, high-level source adapters, semantic classification, mirror sync integrity, and round-trip stability.
 
 ## Contributing
 

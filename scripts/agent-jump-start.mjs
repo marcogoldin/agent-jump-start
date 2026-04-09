@@ -14,6 +14,11 @@ import { writeGeneratedFiles, checkGeneratedFiles, cleanStaleFiles, cleanDirecto
 import { readExternalSkill, readSkillMdFile, readSkillDirectory, exportSkillPackage, parseSkillMdFrontmatter, resolveSkillImportSource } from "../lib/skills.mjs";
 import { CANONICAL_SPEC_SCHEMA } from "../lib/schema.mjs";
 import { runGuidedSetup } from "../lib/interactive.mjs";
+import { diagnoseSpec } from "../lib/doctor.mjs";
+import { defaultLockfilePath, makeProvenanceRecord, writeLockfileEntries } from "../lib/lockfile.mjs";
+import { makeLocalSourceInfo } from "../lib/source-info.mjs";
+import { refreshSkills } from "../lib/skills-updater.mjs";
+import { resolveLayeredSpec, resolveLayeredSpecWithMeta } from "../lib/merging.mjs";
 
 // ---------------------------------------------------------------------------
 // Usage
@@ -25,6 +30,8 @@ function usage() {
 Commands:
   init           [--guided] [--profile <path>] [--target <path>]
   bootstrap      --base <path> [--profile <path>] [--output <path>]
+  sync           --spec <path> [--target <path>]
+  doctor         --spec <path>
   render         --spec <path> [--target <path>] [--clean]
   check          --spec <path> [--target <path>]
   validate       --spec <path>
@@ -33,6 +40,7 @@ Commands:
   add-skill      <source> --spec <path> [--skill <name>] [--replace] [--provider <name>]
   export-skill   --spec <path> --slug <slug> --output <path>
   export-schema  [--output <path>]
+  update-skills  --spec <path> [--skill <slug>] [--dry-run]
   list-agents
   list-profiles
 
@@ -48,6 +56,12 @@ Examples:
     --base specs/base-spec.yaml \\
     --profile specs/profiles/react-vite-mui.profile.yaml \\
     --output canonical-spec.yaml
+
+  node scripts/agent-jump-start.mjs sync \\
+    --spec canonical-spec.yaml
+
+  node scripts/agent-jump-start.mjs doctor \\
+    --spec canonical-spec.yaml
 
   node scripts/agent-jump-start.mjs render \\
     --spec canonical-spec.yaml --target . --clean
@@ -79,6 +93,15 @@ Examples:
     --output ./exported-skills/react-best-practices
 
   node scripts/agent-jump-start.mjs export-schema
+
+  node scripts/agent-jump-start.mjs update-skills \\
+    --spec canonical-spec.yaml
+
+  node scripts/agent-jump-start.mjs update-skills \\
+    --spec canonical-spec.yaml --dry-run
+
+  node scripts/agent-jump-start.mjs update-skills \\
+    --spec canonical-spec.yaml --skill python-pro
 
   node scripts/agent-jump-start.mjs list-agents
   node scripts/agent-jump-start.mjs list-profiles
@@ -115,29 +138,51 @@ async function main() {
 
   const { command, options } = parseArgs(args);
 
-  function importSkillsIntoSpec(specPathInput, sourcePathInput, replaceExisting = false) {
+  function importSkillsIntoSpec(specPathInput, sourcePathInput, replaceExisting = false, sourceInfo = null) {
     const specPath = resolve(specPathInput);
     if (!existsSync(specPath)) {
       throw new Error(`Canonical spec not found: ${specPath}. Run bootstrap first.`);
     }
 
-    const spec = readJsonYaml(specPathInput);
-    const importedSkills = readExternalSkill(sourcePathInput);
+    // Resolve the full layer chain for collision detection (includes
+    // inherited skills from base layers).  Read the raw leaf file
+    // separately — that is the only file we write back to.
+    const { merged: resolvedSpec } = resolveLayeredSpecWithMeta(specPathInput);
+    const resolvedSkills = resolvedSpec.skills ?? [];
 
-    if (!Array.isArray(spec.skills)) {
-      spec.skills = [];
+    const rawLeaf = readJsonYaml(specPathInput);
+    if (!Array.isArray(rawLeaf.skills)) {
+      rawLeaf.skills = [];
     }
+
+    const importedSkills = readExternalSkill(sourcePathInput);
 
     let added = 0;
     let replaced = 0;
+    const lockEntries = [];
     for (const skill of importedSkills) {
       validateSkill(skill, sourcePathInput);
-      const existingIndex = spec.skills.findIndex((s) => s.slug === skill.slug);
-      if (existingIndex >= 0) {
+
+      // Check existence against the resolved (effective) spec so we
+      // detect collisions with skills inherited from base layers.
+      const existsInResolved = resolvedSkills.some((s) => s.slug === skill.slug);
+      // Also check the leaf to find the correct index for replacement.
+      const leafIndex = rawLeaf.skills.findIndex((s) => s.slug === skill.slug);
+
+      if (existsInResolved) {
         if (replaceExisting) {
-          spec.skills[existingIndex] = skill;
+          if (leafIndex >= 0) {
+            rawLeaf.skills[leafIndex] = skill;
+          } else {
+            // Skill lives in a base layer — materialize the override
+            // into the leaf so the base file is never touched.
+            rawLeaf.skills.push(skill);
+          }
           replaced += 1;
           console.log(`  Replaced: ${skill.slug} (v${skill.version})`);
+          if (sourceInfo) {
+            lockEntries.push(makeProvenanceRecord(skill, sourcePathInput, sourceInfo, specPathInput));
+          }
         } else {
           console.log(`  Skipped:  ${skill.slug} (already exists, use --replace to overwrite)`);
           continue;
@@ -146,16 +191,26 @@ async function main() {
         if (!skill.author) {
           skill.author = "Imported";
         }
-        spec.skills.push(skill);
+        rawLeaf.skills.push(skill);
         added += 1;
         console.log(`  Added:    ${skill.slug} (v${skill.version})`);
+        if (sourceInfo) {
+          lockEntries.push(makeProvenanceRecord(skill, sourcePathInput, sourceInfo, specPathInput));
+        }
       }
     }
 
-    writeFileSync(specPath, stringifyJsonYaml(spec), "utf8");
+    // Write back only the leaf file — preserves `extends` and all
+    // other fields that belong to the leaf layer.
+    writeFileSync(specPath, stringifyJsonYaml(rawLeaf), "utf8");
+    if (lockEntries.length > 0) {
+      const lockfilePath = defaultLockfilePath(specPathInput);
+      writeLockfileEntries(lockfilePath, lockEntries);
+      console.log(`Lockfile updated: ${relative(process.cwd(), lockfilePath) || lockfilePath}`);
+    }
     console.log(`\nImport complete: ${added} added, ${replaced} replaced in ${specPathInput}`);
-    console.log(`Total skills in spec: ${spec.skills.length}`);
-    console.log(`\nRun 'render' to regenerate instruction files for all ${AGENT_COUNT} agents.`);
+    console.log(`Total skills in leaf spec: ${rawLeaf.skills.length}`);
+    console.log(`\nRun 'sync' to regenerate instruction files for all ${AGENT_COUNT} agents.`);
   }
 
   // -------------------------------------------------------------------
@@ -182,6 +237,11 @@ async function main() {
       "lib/schema.mjs",
       "lib/introspection.mjs",
       "lib/interactive.mjs",
+      "lib/doctor.mjs",
+      "lib/lockfile.mjs",
+      "lib/source-info.mjs",
+      "lib/skills-updater.mjs",
+      "lib/merging.mjs",
       "specs/base-spec.yaml",
       "prompts/01-bootstrap-any-agent.md",
       "prompts/02-change-stack-or-guidelines.md",
@@ -247,7 +307,7 @@ async function main() {
     } else {
       console.log(`  1. Edit ${specRel} with your real project details`);
     }
-    console.log(`  2. Run: node ${scriptRel} render --spec ${specRel} --target . --clean`);
+    console.log(`  2. Run: node ${scriptRel} sync --spec ${specRel}`);
     console.log(`  3. Commit both the spec and the generated files`);
     return;
   }
@@ -272,12 +332,94 @@ async function main() {
   }
 
   // -------------------------------------------------------------------
+  // sync  (render --clean + check in one step)
+  // -------------------------------------------------------------------
+  if (command === "sync") {
+    assertRequired(options, "spec", command);
+    const targetRoot = resolve(options.target ?? ".");
+    const spec = resolveLayeredSpec(options.spec);
+
+    validateSpec(spec, options.spec);
+
+    const generatedFiles = renderGeneratedFiles(spec, options.spec, targetRoot);
+
+    // Phase 1: clean stale files
+    const removed = cleanStaleFiles(generatedFiles, targetRoot);
+    if (removed.length > 0) {
+      console.log("Cleaned stale files:");
+      for (const filePath of removed) {
+        console.log(`  - ${filePath}`);
+      }
+      console.log("");
+    }
+
+    // Phase 2: write all generated files
+    writeGeneratedFiles(generatedFiles, targetRoot);
+    console.log("Rendered files:");
+    for (const filePath of Object.keys(generatedFiles).sort()) {
+      console.log(`  ${filePath}`);
+    }
+    console.log(`\nTotal: ${Object.keys(generatedFiles).length} files across ${AGENT_COUNT} agent targets`);
+
+    // Phase 3: verify synchronization
+    const { failures, passes } = checkGeneratedFiles(generatedFiles, targetRoot);
+    if (failures.length > 0) {
+      console.log("");
+      for (const failure of failures) {
+        console.log(`FAIL ${failure}`);
+      }
+      console.log(`\n${failures.length} file(s) out of sync after render`);
+      process.exit(1);
+    }
+    console.log(`\nSync check passed for ${passes.length} file(s)`);
+    return;
+  }
+
+  // -------------------------------------------------------------------
+  // doctor
+  // -------------------------------------------------------------------
+  if (command === "doctor") {
+    assertRequired(options, "spec", command);
+    const spec = resolveLayeredSpec(options.spec);
+
+    validateSpec(spec, options.spec);
+
+    const findings = diagnoseSpec(spec);
+    const warnings = findings.filter((f) => f.severity === "warning");
+    const infos = findings.filter((f) => f.severity === "info");
+
+    if (warnings.length > 0) {
+      console.log("Warnings:");
+      for (const f of warnings) {
+        console.log(`  [warning] ${f.area}: ${f.message}`);
+      }
+      console.log("");
+    }
+    if (infos.length > 0) {
+      console.log("Suggestions:");
+      for (const f of infos) {
+        console.log(`  [info] ${f.area}: ${f.message}`);
+      }
+      console.log("");
+    }
+    if (findings.length === 0) {
+      console.log("No issues found. The spec looks ready for production use.");
+    } else {
+      console.log(`Found ${warnings.length} warning(s) and ${infos.length} suggestion(s).`);
+      if (warnings.length > 0) {
+        process.exit(1);
+      }
+    }
+    return;
+  }
+
+  // -------------------------------------------------------------------
   // render
   // -------------------------------------------------------------------
   if (command === "render") {
     assertRequired(options, "spec", command);
     const targetRoot = resolve(options.target ?? ".");
-    const spec = readJsonYaml(options.spec);
+    const spec = resolveLayeredSpec(options.spec);
 
     validateSpec(spec, options.spec);
 
@@ -309,7 +451,7 @@ async function main() {
   if (command === "check") {
     assertRequired(options, "spec", command);
     const targetRoot = resolve(options.target ?? ".");
-    const spec = readJsonYaml(options.spec);
+    const spec = resolveLayeredSpec(options.spec);
 
     validateSpec(spec, options.spec);
 
@@ -334,7 +476,7 @@ async function main() {
   // -------------------------------------------------------------------
   if (command === "validate") {
     assertRequired(options, "spec", command);
-    const spec = readJsonYaml(options.spec);
+    const spec = resolveLayeredSpec(options.spec);
     validateSpec(spec, options.spec);
     console.log(`Spec validation passed: ${options.spec}`);
     if (spec.skills?.length) {
@@ -438,7 +580,7 @@ async function main() {
   if (command === "import-skill") {
     assertRequired(options, "spec", command);
     assertRequired(options, "skill", command);
-    importSkillsIntoSpec(options.spec, options.skill, Boolean(options.replace));
+    importSkillsIntoSpec(options.spec, options.skill, Boolean(options.replace), makeLocalSourceInfo(options.skill));
     return;
   }
 
@@ -462,7 +604,7 @@ async function main() {
 
       console.log(`Resolved skill source: ${resolved.sourceLabel}`);
       console.log(`  Import path: ${resolved.importPath}`);
-      importSkillsIntoSpec(options.spec, resolved.importPath, Boolean(options.replace));
+      importSkillsIntoSpec(options.spec, resolved.importPath, Boolean(options.replace), resolved.sourceInfo ?? null);
     } finally {
       if (cleanupPath) {
         rmSync(cleanupPath, { recursive: true, force: true });
@@ -479,7 +621,7 @@ async function main() {
     assertRequired(options, "slug", command);
     assertRequired(options, "output", command);
 
-    const spec = readJsonYaml(options.spec);
+    const spec = resolveLayeredSpec(options.spec);
     validateSpec(spec, options.spec);
 
     const skill = (spec.skills ?? []).find((s) => s.slug === options.slug);
@@ -495,6 +637,70 @@ async function main() {
     console.log(`Exported skill "${skill.slug}" to ${options.output}:`);
     for (const file of created) {
       console.log(`  ${file}`);
+    }
+    return;
+  }
+
+  // -------------------------------------------------------------------
+  // update-skills
+  // -------------------------------------------------------------------
+  if (command === "update-skills") {
+    assertRequired(options, "spec", command);
+    const specPath = resolve(options.spec);
+    const lockfilePath = defaultLockfilePath(options.spec);
+    const dryRun = Boolean(options["dry-run"]);
+    const slugFilter = options.skill ?? null;
+
+    if (dryRun) {
+      console.log("Dry-run mode: no files will be modified.\n");
+    }
+
+    const results = refreshSkills({ specPath, lockfilePath, dryRun, slugFilter });
+
+    const upToDate = results.filter((r) => r.status === "up-to-date");
+    const changed = results.filter((r) => r.status === "changed");
+    const unreachable = results.filter((r) => r.status === "unreachable");
+    const errors = results.filter((r) => r.status === "error");
+
+    if (changed.length > 0) {
+      console.log(dryRun ? "Would update:" : "Updated:");
+      for (const r of changed) {
+        console.log(`  ${r.slug}  ${r.oldVersion ?? "?"} → ${r.newVersion ?? "?"}`);
+        if (r.message) {
+          for (const line of r.message.split("\n")) {
+            console.log(`    ${line}`);
+          }
+        }
+      }
+      console.log("");
+    }
+
+    if (unreachable.length > 0) {
+      console.log("Unreachable sources (skipped):");
+      for (const r of unreachable) {
+        console.log(`  ${r.slug}: ${r.message}`);
+      }
+      console.log("");
+    }
+
+    if (errors.length > 0) {
+      console.log("Errors:");
+      for (const r of errors) {
+        console.log(`  ${r.slug}: ${r.message}`);
+      }
+      console.log("");
+    }
+
+    console.log(
+      `Summary: ${upToDate.length} up-to-date, ${changed.length} ${dryRun ? "would change" : "updated"}, ` +
+      `${unreachable.length} unreachable, ${errors.length} error(s)`,
+    );
+
+    if (!dryRun && changed.length > 0) {
+      console.log(`\nRun 'render' to regenerate instruction files for all ${AGENT_COUNT} agents.`);
+    }
+    if (errors.length > 0) {
+      process.exitCode = 1;
     }
     return;
   }
