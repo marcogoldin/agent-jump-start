@@ -159,23 +159,6 @@ git add docs/agent-jump-start/canonical-spec.yaml \
 git commit -m "sync: update agent instructions from canonical spec"
 ```
 
-## Layered Specs Status
-
-`extends`-based layered specs are the current scaling priority and are under active development.
-
-What works now:
-
-- resolve overlays for `sync`, `doctor`, `render`, `check`, `validate`, `export-skill`, and `update-skills`
-- keep merge behavior explicit and deterministic instead of relying on generic deep merge
-- fail fast on malformed keyed overlay arrays instead of normalizing them silently
-- preserve `extends` during write workflows by writing only to the raw leaf spec for `import-skill` and `update-skills`
-
-Current limitation:
-
-- layered specs should still be treated as maturing until monorepo governance rules are explicit, especially for ownership policy, subtree boundaries, and when leaf materialization is preferred over base-layer mutation
-
-For the current implementation priority and hardening criteria, see `docs/implementation-prompts/agent-jump-start-roadmap.md`.
-
 ## Skill Packages
 
 Agent Jump Start supports portable skill packages that define reusable instruction sets. Skills are imported into the canonical spec, then synchronized across all agent outputs.
