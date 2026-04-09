@@ -129,27 +129,16 @@ Open `docs/agent-jump-start/canonical-spec.yaml` and fill in:
 
 The spec uses a strict YAML subset that is also valid JSON and can be parsed with `JSON.parse`, keeping the generator zero-dependency.
 
-### 2. Render all outputs
+### 2. Sync
 
 ```bash
-agent-jump-start render \
-  --spec docs/agent-jump-start/canonical-spec.yaml \
-  --target . --clean
+agent-jump-start sync \
+  --spec docs/agent-jump-start/canonical-spec.yaml
 ```
 
-Use `--clean` to remove stale generated files when the spec changes.
+`sync` is the recommended maintenance command. It renders all outputs, removes stale files, and verifies synchronization in one step. It replaces the manual `render --clean` + `check` sequence.
 
-### 3. Verify synchronization
-
-```bash
-agent-jump-start check \
-  --spec docs/agent-jump-start/canonical-spec.yaml \
-  --target .
-```
-
-Exits with code `1` when generated files drift from the spec. Use this in CI.
-
-### 4. Commit
+### 3. Commit
 
 ```bash
 git add docs/agent-jump-start/canonical-spec.yaml \
@@ -367,6 +356,7 @@ agent-jump-start list-profiles
 
 agent-jump-start init [--guided] [--profile <path>] [--target <path>]
 agent-jump-start bootstrap --base <path> [--profile <path>] [--output <path>]
+agent-jump-start sync --spec <path> [--target <path>]
 agent-jump-start render --spec <path> [--target <path>] [--clean]
 agent-jump-start check --spec <path> [--target <path>]
 agent-jump-start validate --spec <path>
@@ -414,7 +404,7 @@ and reimplement the renderer elsewhere.
 npm test
 ```
 
-85 tests covering core workflows, guided onboarding, project introspection, skill import/export, progressive disclosure, high-level source adapters, semantic classification, mirror sync integrity, and round-trip stability.
+89 tests covering core workflows, sync command, guided onboarding, project introspection, skill import/export, progressive disclosure, high-level source adapters, semantic classification, mirror sync integrity, and round-trip stability.
 
 ## Contributing
 

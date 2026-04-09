@@ -973,6 +973,70 @@ test("render --clean removes stale files from previous render", () => {
 });
 
 // ===========================================================================
+// Sync command tests
+// ===========================================================================
+
+test("sync renders files, cleans stale outputs, and passes check in one step", () => {
+  const tempDir = makeTempDir();
+  try {
+    const spec = makeMinimalSpec({
+      skills: [makeSkillFixture({ slug: "sync-test-skill" })],
+    });
+    const specPath = writeSpec(tempDir, spec);
+    const result = runCli(["sync", "--spec", specPath, "--target", tempDir]);
+    expectSuccess(result);
+    assert.match(result.stdout, /Rendered files/);
+    assert.match(result.stdout, /Sync check passed/);
+    assert.ok(existsSync(join(tempDir, ".agents/skills/sync-test-skill/SKILL.md")));
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("sync cleans stale files from a previous render", () => {
+  const tempDir = makeTempDir();
+  try {
+    // First render with a skill
+    const specWithSkill = makeMinimalSpec({
+      skills: [makeSkillFixture({ slug: "stale-skill" })],
+    });
+    const specPath = writeSpec(tempDir, specWithSkill);
+    expectSuccess(runCli(["sync", "--spec", specPath, "--target", tempDir]));
+    assert.ok(existsSync(join(tempDir, ".agents/skills/stale-skill/SKILL.md")));
+
+    // Second sync without the skill
+    const specWithoutSkill = makeMinimalSpec({ skills: [] });
+    writeSpec(tempDir, specWithoutSkill);
+    const result = runCli(["sync", "--spec", specPath, "--target", tempDir]);
+    expectSuccess(result);
+    assert.match(result.stdout, /Cleaned stale files/);
+    assert.ok(!existsSync(join(tempDir, ".agents/skills/stale-skill/SKILL.md")), "Stale skill file should be removed");
+    assert.match(result.stdout, /Sync check passed/);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("sync defaults target to current directory", () => {
+  const tempDir = makeTempDir();
+  try {
+    const spec = makeMinimalSpec();
+    const specPath = writeSpec(tempDir, spec);
+    const result = runCli(["sync", "--spec", specPath], { cwd: tempDir });
+    expectSuccess(result);
+    assert.match(result.stdout, /Sync check passed/);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("sync fails when --spec is missing", () => {
+  const result = runCli(["sync"]);
+  expectFailure(result);
+  assert.match(result.stderr, /--spec/);
+});
+
+// ===========================================================================
 // Validate-skill command tests
 // ===========================================================================
 

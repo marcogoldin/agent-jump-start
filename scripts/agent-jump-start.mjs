@@ -25,6 +25,7 @@ function usage() {
 Commands:
   init           [--guided] [--profile <path>] [--target <path>]
   bootstrap      --base <path> [--profile <path>] [--output <path>]
+  sync           --spec <path> [--target <path>]
   render         --spec <path> [--target <path>] [--clean]
   check          --spec <path> [--target <path>]
   validate       --spec <path>
@@ -48,6 +49,9 @@ Examples:
     --base specs/base-spec.yaml \\
     --profile specs/profiles/react-vite-mui.profile.yaml \\
     --output canonical-spec.yaml
+
+  node scripts/agent-jump-start.mjs sync \\
+    --spec canonical-spec.yaml
 
   node scripts/agent-jump-start.mjs render \\
     --spec canonical-spec.yaml --target . --clean
@@ -247,7 +251,7 @@ async function main() {
     } else {
       console.log(`  1. Edit ${specRel} with your real project details`);
     }
-    console.log(`  2. Run: node ${scriptRel} render --spec ${specRel} --target . --clean`);
+    console.log(`  2. Run: node ${scriptRel} sync --spec ${specRel}`);
     console.log(`  3. Commit both the spec and the generated files`);
     return;
   }
@@ -268,6 +272,50 @@ async function main() {
     ensureDirectory(outputPath);
     writeFileSync(outputPath, stringifyJsonYaml(mergedSpec), "utf8");
     console.log(`Bootstrapped canonical spec: ${outputPath}`);
+    return;
+  }
+
+  // -------------------------------------------------------------------
+  // sync  (render --clean + check in one step)
+  // -------------------------------------------------------------------
+  if (command === "sync") {
+    assertRequired(options, "spec", command);
+    const targetRoot = resolve(options.target ?? ".");
+    const spec = readJsonYaml(options.spec);
+
+    validateSpec(spec, options.spec);
+
+    const generatedFiles = renderGeneratedFiles(spec, options.spec, targetRoot);
+
+    // Phase 1: clean stale files
+    const removed = cleanStaleFiles(generatedFiles, targetRoot);
+    if (removed.length > 0) {
+      console.log("Cleaned stale files:");
+      for (const filePath of removed) {
+        console.log(`  - ${filePath}`);
+      }
+      console.log("");
+    }
+
+    // Phase 2: write all generated files
+    writeGeneratedFiles(generatedFiles, targetRoot);
+    console.log("Rendered files:");
+    for (const filePath of Object.keys(generatedFiles).sort()) {
+      console.log(`  ${filePath}`);
+    }
+    console.log(`\nTotal: ${Object.keys(generatedFiles).length} files across ${AGENT_COUNT} agent targets`);
+
+    // Phase 3: verify synchronization
+    const { failures, passes } = checkGeneratedFiles(generatedFiles, targetRoot);
+    if (failures.length > 0) {
+      console.log("");
+      for (const failure of failures) {
+        console.log(`FAIL ${failure}`);
+      }
+      console.log(`\n${failures.length} file(s) out of sync after render`);
+      process.exit(1);
+    }
+    console.log(`\nSync check passed for ${passes.length} file(s)`);
     return;
   }
 
