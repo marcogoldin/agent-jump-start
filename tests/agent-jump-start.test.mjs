@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { introspectProject, formatDetectedComponents, suggestPackageManagerRule, suggestRuntimeRule } from "../lib/introspection.mjs";
+import { mergeByKey, mergeSpecLayers, resolveLayeredSpec } from "../lib/merging.mjs";
 
 const scriptPath = resolve("scripts/agent-jump-start.mjs");
 
@@ -1045,8 +1046,9 @@ test("export-schema produces valid JSON Schema", () => {
     const schema = JSON.parse(readFileSync(schemaPath, "utf8"));
     assert.equal(schema.$schema, "https://json-schema.org/draft/2020-12/schema");
     assert.equal(schema.type, "object");
-    assert.ok(schema.required.includes("schemaVersion"));
-    assert.ok(schema.required.includes("project"));
+    assert.ok(schema.then?.required?.includes("schemaVersion"), "schemaVersion required when extends absent");
+    assert.ok(schema.then?.required?.includes("project"), "project required when extends absent");
+    assert.ok(schema.properties?.extends, "Schema should have extends property");
     assert.ok(schema.$defs?.skill, "Schema should define skill type");
     assert.ok(schema.$defs?.skillReference, "Schema should define skillReference type");
 
@@ -3040,6 +3042,346 @@ test("update-skills exits non-zero when refresh reports internal errors", () => 
     assert.match(result.stdout, /Errors:/);
     assert.match(result.stdout, /broken-skill/);
     assert.match(result.stdout, /1 error/);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+// ===========================================================================
+// Layered specs — mergeByKey unit tests
+// ===========================================================================
+
+test("mergeByKey: overlay replaces base entry by key and appends new entries", () => {
+  const base = [
+    { title: "General rules", rules: ["Rule A"] },
+    { title: "React rules", rules: ["Rule B"] },
+  ];
+  const overlay = [
+    { title: "General rules", rules: ["Rule A replaced"] },
+    { title: "Python rules", rules: ["Rule C"] },
+  ];
+  const result = mergeByKey(base, overlay, "title");
+
+  assert.equal(result.length, 3);
+  assert.deepEqual(result[0], { title: "General rules", rules: ["Rule A replaced"] });
+  assert.deepEqual(result[1], { title: "React rules", rules: ["Rule B"] });
+  assert.deepEqual(result[2], { title: "Python rules", rules: ["Rule C"] });
+});
+
+test("mergeByKey: empty overlay returns clone of base", () => {
+  const base = [{ slug: "a", value: 1 }];
+  const result = mergeByKey(base, [], "slug");
+  assert.deepEqual(result, base);
+  assert.notEqual(result[0], base[0]); // deve essere un clone
+});
+
+test("mergeByKey: empty base returns clone of overlay", () => {
+  const overlay = [{ slug: "b", value: 2 }];
+  const result = mergeByKey([], overlay, "slug");
+  assert.deepEqual(result, overlay);
+});
+
+test("mergeByKey: null base returns clone of overlay", () => {
+  const overlay = [{ slug: "c" }];
+  const result = mergeByKey(null, overlay, "slug");
+  assert.deepEqual(result, overlay);
+});
+
+// ===========================================================================
+// Layered specs — mergeSpecLayers unit tests
+// ===========================================================================
+
+test("mergeSpecLayers: overlay scalars replace base scalars", () => {
+  const base = makeMinimalSpec();
+  const overlay = {
+    project: { name: "Override Name", summary: "Override summary" },
+  };
+  const merged = mergeSpecLayers(base, overlay);
+
+  assert.equal(merged.project.name, "Override Name");
+  assert.equal(merged.project.summary, "Override summary");
+  assert.equal(merged.schemaVersion, 1);
+});
+
+test("mergeSpecLayers: overlay components replace entire array", () => {
+  const base = makeMinimalSpec();
+  base.project.components = ["comp-a"];
+  const overlay = {
+    project: { components: ["comp-b", "comp-c"] },
+  };
+  const merged = mergeSpecLayers(base, overlay);
+  assert.deepEqual(merged.project.components, ["comp-b", "comp-c"]);
+});
+
+test("mergeSpecLayers: sections use append+replace by title", () => {
+  const base = makeMinimalSpec();
+  base.workspaceInstructions.sections = [
+    { title: "General rules", rules: ["Rule A"] },
+    { title: "React rules", rules: ["Rule B"] },
+  ];
+  const overlay = {
+    workspaceInstructions: {
+      sections: [
+        { title: "General rules", rules: ["Rule A v2"] },
+        { title: "Python rules", rules: ["Rule P"] },
+      ],
+    },
+  };
+  const merged = mergeSpecLayers(base, overlay);
+
+  assert.equal(merged.workspaceInstructions.sections.length, 3);
+  assert.equal(merged.workspaceInstructions.sections[0].title, "General rules");
+  assert.deepEqual(merged.workspaceInstructions.sections[0].rules, ["Rule A v2"]);
+  assert.equal(merged.workspaceInstructions.sections[1].title, "React rules");
+  assert.equal(merged.workspaceInstructions.sections[2].title, "Python rules");
+});
+
+test("mergeSpecLayers: validation replaces entire array", () => {
+  const base = makeMinimalSpec();
+  const overlay = {
+    workspaceInstructions: { validation: ["pytest", "mypy"] },
+  };
+  const merged = mergeSpecLayers(base, overlay);
+  assert.deepEqual(merged.workspaceInstructions.validation, ["pytest", "mypy"]);
+});
+
+test("mergeSpecLayers: reviewChecklist replaces entire object", () => {
+  const base = makeMinimalSpec();
+  const newChecklist = {
+    intro: "New checklist",
+    failureThreshold: 3,
+    items: [{ title: "Item X" }],
+  };
+  const overlay = { reviewChecklist: newChecklist };
+  const merged = mergeSpecLayers(base, overlay);
+  assert.deepEqual(merged.reviewChecklist, newChecklist);
+});
+
+test("mergeSpecLayers: skills use append+replace by slug", () => {
+  const base = makeMinimalSpec({ skills: [makeSkillFixture({ slug: "alpha" })] });
+  const newSkill = makeSkillFixture({ slug: "beta", title: "Beta Skill" });
+  const replacedAlpha = makeSkillFixture({ slug: "alpha", title: "Alpha Replaced" });
+  const overlay = { skills: [replacedAlpha, newSkill] };
+  const merged = mergeSpecLayers(base, overlay);
+
+  assert.equal(merged.skills.length, 2);
+  assert.equal(merged.skills[0].slug, "alpha");
+  assert.equal(merged.skills[0].title, "Alpha Replaced");
+  assert.equal(merged.skills[1].slug, "beta");
+});
+
+test("mergeSpecLayers: absent overlay fields do not alter base", () => {
+  const base = makeMinimalSpec({ skills: [makeSkillFixture()] });
+  const overlay = {};
+  const merged = mergeSpecLayers(base, overlay);
+  assert.deepEqual(merged, base);
+});
+
+// ===========================================================================
+// Layered specs — resolveLayeredSpec integration tests
+// ===========================================================================
+
+test("resolveLayeredSpec: single spec without extends returns itself", () => {
+  const tempDir = makeTempDir();
+  try {
+    const specPath = writeSpec(tempDir, makeMinimalSpec());
+    const resolved = resolveLayeredSpec(specPath);
+    assert.equal(resolved.project.name, "Test");
+    assert.equal(resolved.schemaVersion, 1);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("resolveLayeredSpec: two-layer extends chain merges correctly", () => {
+  const tempDir = makeTempDir();
+  try {
+    const base = makeMinimalSpec();
+    base.workspaceInstructions.sections = [
+      { title: "General rules", rules: ["Base rule"] },
+    ];
+    writeSpec(tempDir, base, "base.yaml");
+
+    const overlay = {
+      extends: "./base.yaml",
+      project: { name: "Overlay Project" },
+      workspaceInstructions: {
+        sections: [
+          { title: "General rules", rules: ["Overlay rule"] },
+          { title: "Extra section", rules: ["Extra rule"] },
+        ],
+      },
+    };
+    const overlayPath = writeSpec(tempDir, overlay, "overlay.yaml");
+
+    const resolved = resolveLayeredSpec(overlayPath);
+
+    assert.equal(resolved.project.name, "Overlay Project");
+    assert.equal(resolved.project.summary, "Test spec");
+    assert.equal(resolved.workspaceInstructions.sections.length, 2);
+    assert.deepEqual(resolved.workspaceInstructions.sections[0].rules, ["Overlay rule"]);
+    assert.equal(resolved.workspaceInstructions.sections[1].title, "Extra section");
+    assert.equal(resolved.extends, undefined);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("resolveLayeredSpec: three-layer chain merges in correct order", () => {
+  const tempDir = makeTempDir();
+  try {
+    const root = makeMinimalSpec();
+    root.project.name = "Root";
+    writeSpec(tempDir, root, "root.yaml");
+
+    const mid = {
+      extends: "./root.yaml",
+      project: { name: "Mid" },
+      workspaceInstructions: {
+        sections: [{ title: "Mid section", rules: ["Mid rule"] }],
+      },
+    };
+    writeSpec(tempDir, mid, "mid.yaml");
+
+    const leaf = {
+      extends: "./mid.yaml",
+      project: { name: "Leaf" },
+    };
+    const leafPath = writeSpec(tempDir, leaf, "leaf.yaml");
+
+    const resolved = resolveLayeredSpec(leafPath);
+
+    assert.equal(resolved.project.name, "Leaf");
+    // Mid section dovrebbe essere presente (ereditata dal layer intermedio)
+    const midSection = resolved.workspaceInstructions.sections.find(
+      (s) => s.title === "Mid section",
+    );
+    assert.ok(midSection, "Mid section should be inherited");
+    assert.deepEqual(midSection.rules, ["Mid rule"]);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("resolveLayeredSpec: circular extends throws", () => {
+  const tempDir = makeTempDir();
+  try {
+    const specA = { extends: "./b.yaml", project: { name: "A" } };
+    const specB = { extends: "./a.yaml", project: { name: "B" } };
+    writeSpec(tempDir, specA, "a.yaml");
+    writeSpec(tempDir, specB, "b.yaml");
+
+    assert.throws(
+      () => resolveLayeredSpec(join(tempDir, "a.yaml")),
+      /[Cc]ircular/,
+    );
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("resolveLayeredSpec: missing base file throws", () => {
+  const tempDir = makeTempDir();
+  try {
+    const overlay = { extends: "./nonexistent.yaml", project: { name: "X" } };
+    const overlayPath = writeSpec(tempDir, overlay, "overlay.yaml");
+
+    assert.throws(
+      () => resolveLayeredSpec(overlayPath),
+      /ENOENT|no such file/i,
+    );
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+// ===========================================================================
+// Layered specs — CLI integration tests
+// ===========================================================================
+
+test("CLI sync works with a layered overlay spec", () => {
+  const tempDir = makeTempDir();
+  try {
+    const base = makeMinimalSpec();
+    writeSpec(tempDir, base, "base.yaml");
+
+    const overlay = {
+      extends: "./base.yaml",
+      project: { name: "Overlay via CLI" },
+    };
+    const overlayPath = writeSpec(tempDir, overlay, "overlay.yaml");
+
+    const result = runCli(["sync", "--spec", overlayPath, "--target", tempDir]);
+    expectSuccess(result);
+    assert.match(result.stdout, /Rendered files:/);
+
+    // Il Cursor MDC generato deve contenere il nome dell'overlay
+    const cursorContent = readFileSync(join(tempDir, ".cursor", "rules", "agent-instructions.mdc"), "utf8");
+    assert.match(cursorContent, /Overlay via CLI/);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("CLI validate passes on merged overlay", () => {
+  const tempDir = makeTempDir();
+  try {
+    const base = makeMinimalSpec();
+    writeSpec(tempDir, base, "base.yaml");
+
+    const overlay = {
+      extends: "./base.yaml",
+      project: { name: "Valid Overlay" },
+      workspaceInstructions: {
+        sections: [{ title: "New section", rules: ["A rule"] }],
+      },
+    };
+    const overlayPath = writeSpec(tempDir, overlay, "overlay.yaml");
+
+    const result = runCli(["validate", "--spec", overlayPath]);
+    expectSuccess(result);
+    assert.match(result.stdout, /validation passed/);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("CLI render with overlay produces correct output", () => {
+  const tempDir = makeTempDir();
+  try {
+    const base = makeMinimalSpec();
+    base.workspaceInstructions.sections = [
+      { title: "General rules", rules: ["Base general rule"] },
+    ];
+    writeSpec(tempDir, base, "base.yaml");
+
+    const overlay = {
+      extends: "./base.yaml",
+      project: { name: "Rendered Overlay" },
+      workspaceInstructions: {
+        sections: [{ title: "Python rules", rules: ["Use type hints"] }],
+      },
+    };
+    const overlayPath = writeSpec(tempDir, overlay, "overlay.yaml");
+
+    const result = runCli(["render", "--spec", overlayPath, "--target", tempDir]);
+    expectSuccess(result);
+
+    // Il contenuto generato deve avere sia la base section che quella nuova
+    const copilotContent = readFileSync(
+      join(tempDir, ".github", "copilot-instructions.md"),
+      "utf8",
+    );
+    assert.match(copilotContent, /General rules/);
+    assert.match(copilotContent, /Python rules/);
+    assert.match(copilotContent, /Use type hints/);
+
+    // Il Cursor MDC contiene il project name dell'overlay
+    const cursorContent = readFileSync(
+      join(tempDir, ".cursor", "rules", "agent-instructions.mdc"),
+      "utf8",
+    );
+    assert.match(cursorContent, /Rendered Overlay/);
   } finally {
     cleanupTempDir(tempDir);
   }

@@ -18,6 +18,7 @@ import { diagnoseSpec } from "../lib/doctor.mjs";
 import { defaultLockfilePath, makeProvenanceRecord, writeLockfileEntries } from "../lib/lockfile.mjs";
 import { makeLocalSourceInfo } from "../lib/source-info.mjs";
 import { refreshSkills } from "../lib/skills-updater.mjs";
+import { resolveLayeredSpec } from "../lib/merging.mjs";
 
 // ---------------------------------------------------------------------------
 // Usage
@@ -220,6 +221,7 @@ async function main() {
       "lib/lockfile.mjs",
       "lib/source-info.mjs",
       "lib/skills-updater.mjs",
+      "lib/merging.mjs",
       "specs/base-spec.yaml",
       "prompts/01-bootstrap-any-agent.md",
       "prompts/02-change-stack-or-guidelines.md",
@@ -315,7 +317,7 @@ async function main() {
   if (command === "sync") {
     assertRequired(options, "spec", command);
     const targetRoot = resolve(options.target ?? ".");
-    const spec = readJsonYaml(options.spec);
+    const spec = resolveLayeredSpec(options.spec);
 
     validateSpec(spec, options.spec);
 
@@ -358,7 +360,7 @@ async function main() {
   // -------------------------------------------------------------------
   if (command === "doctor") {
     assertRequired(options, "spec", command);
-    const spec = readJsonYaml(options.spec);
+    const spec = resolveLayeredSpec(options.spec);
 
     validateSpec(spec, options.spec);
 
@@ -397,7 +399,7 @@ async function main() {
   if (command === "render") {
     assertRequired(options, "spec", command);
     const targetRoot = resolve(options.target ?? ".");
-    const spec = readJsonYaml(options.spec);
+    const spec = resolveLayeredSpec(options.spec);
 
     validateSpec(spec, options.spec);
 
@@ -429,7 +431,7 @@ async function main() {
   if (command === "check") {
     assertRequired(options, "spec", command);
     const targetRoot = resolve(options.target ?? ".");
-    const spec = readJsonYaml(options.spec);
+    const spec = resolveLayeredSpec(options.spec);
 
     validateSpec(spec, options.spec);
 
@@ -454,7 +456,7 @@ async function main() {
   // -------------------------------------------------------------------
   if (command === "validate") {
     assertRequired(options, "spec", command);
-    const spec = readJsonYaml(options.spec);
+    const spec = resolveLayeredSpec(options.spec);
     validateSpec(spec, options.spec);
     console.log(`Spec validation passed: ${options.spec}`);
     if (spec.skills?.length) {

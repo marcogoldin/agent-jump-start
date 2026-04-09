@@ -159,6 +159,22 @@ git add docs/agent-jump-start/canonical-spec.yaml \
 git commit -m "sync: update agent instructions from canonical spec"
 ```
 
+## Layered Specs Status
+
+`extends`-based layered specs are the current scaling priority and are under active development.
+
+Current intent:
+
+- resolve overlays for `sync`, `doctor`, `render`, `check`, and `validate`
+- keep merge behavior explicit and deterministic instead of relying on generic deep merge
+- make base-plus-overlay setups practical for monorepos and shared governance
+
+Current limitation:
+
+- layered specs should still be treated as experimental until skill-oriented workflows such as `export-skill` and `update-skills` follow the same resolution model, and keyed overlay entries fail validation instead of being normalized silently
+
+For the current implementation priority and hardening criteria, see `docs/implementation-prompts/agent-jump-start-roadmap.md`.
+
 ## Skill Packages
 
 Agent Jump Start supports portable skill packages that define reusable instruction sets. Skills are imported into the canonical spec, then synchronized across all agent outputs.
