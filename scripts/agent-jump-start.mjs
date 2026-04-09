@@ -14,6 +14,7 @@ import { writeGeneratedFiles, checkGeneratedFiles, cleanStaleFiles, cleanDirecto
 import { readExternalSkill, readSkillMdFile, readSkillDirectory, exportSkillPackage, parseSkillMdFrontmatter, resolveSkillImportSource } from "../lib/skills.mjs";
 import { CANONICAL_SPEC_SCHEMA } from "../lib/schema.mjs";
 import { runGuidedSetup } from "../lib/interactive.mjs";
+import { diagnoseSpec } from "../lib/doctor.mjs";
 
 // ---------------------------------------------------------------------------
 // Usage
@@ -26,6 +27,7 @@ Commands:
   init           [--guided] [--profile <path>] [--target <path>]
   bootstrap      --base <path> [--profile <path>] [--output <path>]
   sync           --spec <path> [--target <path>]
+  doctor         --spec <path>
   render         --spec <path> [--target <path>] [--clean]
   check          --spec <path> [--target <path>]
   validate       --spec <path>
@@ -51,6 +53,9 @@ Examples:
     --output canonical-spec.yaml
 
   node scripts/agent-jump-start.mjs sync \\
+    --spec canonical-spec.yaml
+
+  node scripts/agent-jump-start.mjs doctor \\
     --spec canonical-spec.yaml
 
   node scripts/agent-jump-start.mjs render \\
@@ -186,6 +191,7 @@ async function main() {
       "lib/schema.mjs",
       "lib/introspection.mjs",
       "lib/interactive.mjs",
+      "lib/doctor.mjs",
       "specs/base-spec.yaml",
       "prompts/01-bootstrap-any-agent.md",
       "prompts/02-change-stack-or-guidelines.md",
@@ -316,6 +322,44 @@ async function main() {
       process.exit(1);
     }
     console.log(`\nSync check passed for ${passes.length} file(s)`);
+    return;
+  }
+
+  // -------------------------------------------------------------------
+  // doctor
+  // -------------------------------------------------------------------
+  if (command === "doctor") {
+    assertRequired(options, "spec", command);
+    const spec = readJsonYaml(options.spec);
+
+    validateSpec(spec, options.spec);
+
+    const findings = diagnoseSpec(spec);
+    const warnings = findings.filter((f) => f.severity === "warning");
+    const infos = findings.filter((f) => f.severity === "info");
+
+    if (warnings.length > 0) {
+      console.log("Warnings:");
+      for (const f of warnings) {
+        console.log(`  [warning] ${f.area}: ${f.message}`);
+      }
+      console.log("");
+    }
+    if (infos.length > 0) {
+      console.log("Suggestions:");
+      for (const f of infos) {
+        console.log(`  [info] ${f.area}: ${f.message}`);
+      }
+      console.log("");
+    }
+    if (findings.length === 0) {
+      console.log("No issues found. The spec looks ready for production use.");
+    } else {
+      console.log(`Found ${warnings.length} warning(s) and ${infos.length} suggestion(s).`);
+      if (warnings.length > 0) {
+        process.exit(1);
+      }
+    }
     return;
   }
 

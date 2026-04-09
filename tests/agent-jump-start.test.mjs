@@ -1037,6 +1037,187 @@ test("sync fails when --spec is missing", () => {
 });
 
 // ===========================================================================
+// Doctor command tests
+// ===========================================================================
+
+test("doctor reports warnings for unedited base spec", () => {
+  const tempDir = makeTempDir();
+  try {
+    const spec = {
+      schemaVersion: 1,
+      project: {
+        name: "Replace this project name",
+        summary: "Portable AI instruction system generated from one canonical spec.",
+        components: [
+          "Replace this list with the real applications, services, or packages in the repository.",
+        ],
+      },
+      workspaceInstructions: {
+        sections: [{ title: "General rules", rules: ["Keep changes small."] }],
+        validation: [
+          "Document the baseline validation commands for this repository and keep them current.",
+        ],
+      },
+      reviewChecklist: {
+        intro: "Checklist",
+        failureThreshold: 1,
+        items: [{ title: "Check" }],
+      },
+      skills: [],
+    };
+    const specPath = writeSpec(tempDir, spec);
+    const result = runCli(["doctor", "--spec", specPath]);
+    expectFailure(result);
+    assert.match(result.stdout, /\[warning\] project\.name/);
+    assert.match(result.stdout, /\[warning\] project\.components\[0\]/);
+    assert.match(result.stdout, /\[warning\] workspaceInstructions\.validation/);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("doctor passes clean for a well-filled spec", () => {
+  const tempDir = makeTempDir();
+  try {
+    const spec = {
+      schemaVersion: 1,
+      project: {
+        name: "My Real Project",
+        summary: "A real project with actual content.",
+        components: ["api: Express.js REST service", "web: React frontend"],
+      },
+      workspaceInstructions: {
+        sections: [
+          { title: "General rules", rules: ["Keep changes small."] },
+          { title: "API rules", rules: ["Use centralized error handling."] },
+        ],
+        validation: ["npx eslint .", "npx tsc --noEmit", "npx vitest run"],
+      },
+      reviewChecklist: {
+        intro: "Review checklist for real project.",
+        failureThreshold: 2,
+        items: [{ title: "Uses real constraints" }],
+      },
+      skills: [makeSkillFixture()],
+    };
+    const specPath = writeSpec(tempDir, spec);
+    const result = runCli(["doctor", "--spec", specPath]);
+    expectSuccess(result);
+    assert.match(result.stdout, /No issues found/);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("doctor reports info when no skills are defined", () => {
+  const tempDir = makeTempDir();
+  try {
+    const spec = {
+      schemaVersion: 1,
+      project: {
+        name: "Real Project",
+        summary: "Actual project.",
+        components: ["api: Node.js service"],
+      },
+      workspaceInstructions: {
+        sections: [
+          { title: "General rules", rules: ["Keep changes small."] },
+          { title: "Node rules", rules: ["Use Express middleware."] },
+        ],
+        validation: ["npx eslint .", "npx vitest run"],
+      },
+      reviewChecklist: {
+        intro: "Checklist",
+        failureThreshold: 1,
+        items: [{ title: "Check" }],
+      },
+      skills: [],
+    };
+    const specPath = writeSpec(tempDir, spec);
+    const result = runCli(["doctor", "--spec", specPath]);
+    // info-only findings do not cause exit(1)
+    expectSuccess(result);
+    assert.match(result.stdout, /\[info\] skills/);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("doctor reports info for single General rules section", () => {
+  const tempDir = makeTempDir();
+  try {
+    const spec = {
+      schemaVersion: 1,
+      project: {
+        name: "Real Project",
+        summary: "Actual project.",
+        components: ["api: service"],
+      },
+      workspaceInstructions: {
+        sections: [{ title: "General rules", rules: ["Keep changes small."] }],
+        validation: ["npx eslint ."],
+      },
+      reviewChecklist: {
+        intro: "Checklist",
+        failureThreshold: 1,
+        items: [{ title: "Check" }],
+      },
+      skills: [makeSkillFixture()],
+    };
+    const specPath = writeSpec(tempDir, spec);
+    const result = runCli(["doctor", "--spec", specPath]);
+    expectSuccess(result);
+    assert.match(result.stdout, /\[info\] workspaceInstructions\.sections/);
+    assert.match(result.stdout, /Consider adding stack-specific sections/);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("doctor fails when --spec is missing", () => {
+  const result = runCli(["doctor"]);
+  expectFailure(result);
+  assert.match(result.stderr, /--spec/);
+});
+
+test("doctor detects generic validation commands", () => {
+  const tempDir = makeTempDir();
+  try {
+    const spec = {
+      schemaVersion: 1,
+      project: {
+        name: "Real Project",
+        summary: "Actual project.",
+        components: ["api: service"],
+      },
+      workspaceInstructions: {
+        sections: [
+          { title: "General rules", rules: ["Keep changes small."] },
+          { title: "Extra rules", rules: ["Be explicit."] },
+        ],
+        validation: [
+          "Run the repository's lint command.",
+          "Run the repository's build command.",
+        ],
+      },
+      reviewChecklist: {
+        intro: "Checklist",
+        failureThreshold: 1,
+        items: [{ title: "Check" }],
+      },
+      skills: [makeSkillFixture()],
+    };
+    const specPath = writeSpec(tempDir, spec);
+    const result = runCli(["doctor", "--spec", specPath]);
+    expectFailure(result);
+    assert.match(result.stdout, /\[warning\] workspaceInstructions\.validation/);
+    assert.match(result.stdout, /generic/i);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+// ===========================================================================
 // Validate-skill command tests
 // ===========================================================================
 

@@ -138,7 +138,16 @@ agent-jump-start sync \
 
 `sync` is the recommended maintenance command. It renders all outputs, removes stale files, and verifies synchronization in one step. It replaces the manual `render --clean` + `check` sequence.
 
-### 3. Commit
+### 3. Diagnose weak or incomplete content
+
+```bash
+agent-jump-start doctor \
+  --spec docs/agent-jump-start/canonical-spec.yaml
+```
+
+`doctor` inspects the spec for placeholder text, generic validation commands, missing components, and other signs that the setup is still scaffolded rather than production-ready. Exits with code `1` when warnings are found.
+
+### 4. Commit
 
 ```bash
 git add docs/agent-jump-start/canonical-spec.yaml \
@@ -357,6 +366,7 @@ agent-jump-start list-profiles
 agent-jump-start init [--guided] [--profile <path>] [--target <path>]
 agent-jump-start bootstrap --base <path> [--profile <path>] [--output <path>]
 agent-jump-start sync --spec <path> [--target <path>]
+agent-jump-start doctor --spec <path>
 agent-jump-start render --spec <path> [--target <path>] [--clean]
 agent-jump-start check --spec <path> [--target <path>]
 agent-jump-start validate --spec <path>
@@ -404,7 +414,7 @@ and reimplement the renderer elsewhere.
 npm test
 ```
 
-89 tests covering core workflows, sync command, guided onboarding, project introspection, skill import/export, progressive disclosure, high-level source adapters, semantic classification, mirror sync integrity, and round-trip stability.
+95 tests covering core workflows, sync command, doctor diagnostics, guided onboarding, project introspection, skill import/export, progressive disclosure, high-level source adapters, semantic classification, mirror sync integrity, and round-trip stability.
 
 ## Contributing
 
