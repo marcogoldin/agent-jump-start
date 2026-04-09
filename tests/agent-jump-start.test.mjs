@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { introspectProject, formatDetectedComponents, suggestPackageManagerRule, suggestRuntimeRule } from "../lib/introspection.mjs";
-import { mergeByKey, mergeSpecLayers, resolveLayeredSpec } from "../lib/merging.mjs";
+import { mergeByKey, mergeSpecLayers, resolveLayeredSpec, resolveLayeredSpecWithMeta } from "../lib/merging.mjs";
 
 const scriptPath = resolve("scripts/agent-jump-start.mjs");
 
@@ -3382,6 +3382,337 @@ test("CLI render with overlay produces correct output", () => {
       "utf8",
     );
     assert.match(cursorContent, /Rendered Overlay/);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+// ===========================================================================
+// Layered specs — export-skill with overlay
+// ===========================================================================
+
+test("export-skill works on a layered overlay spec", () => {
+  const tempDir = makeTempDir();
+  try {
+    const skill = makeSkillFixture({ slug: "layered-export-test" });
+    const base = makeMinimalSpec({ skills: [skill] });
+    writeSpec(tempDir, base, "base.yaml");
+
+    const overlay = {
+      extends: "./base.yaml",
+      project: { name: "Export Overlay" },
+    };
+    const overlayPath = writeSpec(tempDir, overlay, "overlay.yaml");
+
+    const outputDir = join(tempDir, "exported");
+    const result = runCli([
+      "export-skill", "--spec", overlayPath,
+      "--slug", "layered-export-test",
+      "--output", outputDir,
+    ]);
+    expectSuccess(result);
+    assert.match(result.stdout, /layered-export-test/);
+    assert.ok(existsSync(join(outputDir, "SKILL.md")));
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+// ===========================================================================
+// mergeByKey — fail-fast validation
+// ===========================================================================
+
+test("mergeByKey: throws on overlay entry missing key field", () => {
+  const base = [{ slug: "a", name: "A" }];
+  const overlay = [{ name: "No slug" }];
+
+  assert.throws(
+    () => mergeByKey(base, overlay, "slug"),
+    /missing required key field "slug"/,
+  );
+});
+
+test("mergeByKey: throws on duplicate key in overlay array", () => {
+  const base = [{ slug: "a", name: "A" }];
+  const overlay = [
+    { slug: "b", name: "B1" },
+    { slug: "b", name: "B2" },
+  ];
+
+  assert.throws(
+    () => mergeByKey(base, overlay, "slug"),
+    /[Dd]uplicate.*"slug".*"b"/,
+  );
+});
+
+test("mergeByKey: throws on base entry missing key field", () => {
+  const base = [{ name: "No slug" }];
+  const overlay = [{ slug: "a", name: "A" }];
+
+  assert.throws(
+    () => mergeByKey(base, overlay, "slug"),
+    /missing required key field "slug"/,
+  );
+});
+
+test("mergeByKey: valid inputs still merge correctly after hardening", () => {
+  const base = [
+    { slug: "a", name: "A" },
+    { slug: "b", name: "B" },
+  ];
+  const overlay = [
+    { slug: "b", name: "B-override" },
+    { slug: "c", name: "C-new" },
+  ];
+
+  const result = mergeByKey(base, overlay, "slug");
+  assert.equal(result.length, 3);
+  assert.equal(result[0].name, "A");
+  assert.equal(result[1].name, "B-override");
+  assert.equal(result[2].name, "C-new");
+});
+
+// ===========================================================================
+// Writeback semantics — layered spec side-effect isolation
+// ===========================================================================
+
+test("resolveLayeredSpecWithMeta returns leaf metadata alongside merged spec", () => {
+  const tempDir = makeTempDir();
+  try {
+    const base = makeMinimalSpec({
+      skills: [makeSkillFixture({ slug: "base-skill" })],
+    });
+    writeSpec(tempDir, base, "base.yaml");
+
+    const overlay = {
+      extends: "./base.yaml",
+      project: { name: "Overlay Project" },
+      skills: [makeSkillFixture({ slug: "leaf-skill" })],
+    };
+    const overlayPath = writeSpec(tempDir, overlay, "overlay.yaml");
+
+    const meta = resolveLayeredSpecWithMeta(overlayPath);
+
+    // merged contains skills from both layers
+    assert.equal(meta.merged.project.name, "Overlay Project");
+    const mergedSlugs = meta.merged.skills.map((s) => s.slug);
+    assert.ok(mergedSlugs.includes("base-skill"), "merged should include base skill");
+    assert.ok(mergedSlugs.includes("leaf-skill"), "merged should include leaf skill");
+
+    // leafSpec contains only the leaf's own fields (no base skills)
+    const leafSlugs = (meta.leafSpec.skills ?? []).map((s) => s.slug);
+    assert.ok(leafSlugs.includes("leaf-skill"), "leaf should include its own skill");
+    assert.ok(!leafSlugs.includes("base-skill"), "leaf should NOT include base skill");
+
+    // metadata
+    assert.ok(meta.isLayered);
+    assert.equal(meta.chain.length, 2);
+    assert.equal(meta.leafPath, resolve(overlayPath));
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("import-skill on overlay spec preserves extends and does not flatten base", () => {
+  const tempDir = makeTempDir();
+  try {
+    // Base spec with one skill
+    const base = makeMinimalSpec({
+      skills: [makeSkillFixture({ slug: "base-only-skill" })],
+    });
+    writeSpec(tempDir, base, "base.yaml");
+
+    // Overlay that extends base — starts with no skills of its own
+    const overlay = {
+      extends: "./base.yaml",
+      project: { name: "Overlay" },
+    };
+    const overlayPath = writeSpec(tempDir, overlay, "overlay.yaml");
+
+    // Build a standalone skill directory to import
+    const skillDir = join(tempDir, "ext-skill");
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(
+      join(skillDir, "SKILL.md"),
+      [
+        "---",
+        'name: "imported-skill"',
+        'description: "A skill imported into the overlay"',
+        "---",
+        "",
+        "# Imported Skill",
+        "",
+        "Some content.",
+      ].join("\n"),
+      "utf8",
+    );
+
+    // Import the skill into the overlay
+    const result = runCli([
+      "import-skill", "--spec", overlayPath, "--skill", skillDir,
+    ]);
+    expectSuccess(result);
+    assert.match(result.stdout, /Added.*imported-skill/);
+
+    // Read back the overlay file from disk
+    const writtenOverlay = JSON.parse(readFileSync(overlayPath, "utf8"));
+
+    // extends must be preserved
+    assert.equal(writtenOverlay.extends, "./base.yaml",
+      "extends field must survive writeback");
+
+    // The overlay must NOT contain base-layer fields like schemaVersion
+    // or the base skill — only its own additions.
+    assert.equal(writtenOverlay.schemaVersion, undefined,
+      "schemaVersion belongs to the base, not the overlay");
+
+    // The overlay skills array must contain only the imported skill
+    const overlaySlugs = (writtenOverlay.skills ?? []).map((s) => s.slug);
+    assert.ok(overlaySlugs.includes("imported-skill"),
+      "imported skill should be in the overlay");
+    assert.ok(!overlaySlugs.includes("base-only-skill"),
+      "base skill must NOT leak into the overlay file");
+
+    // The resolved spec should see all skills (base + overlay)
+    const resolved = resolveLayeredSpec(overlayPath);
+    const resolvedSlugs = resolved.skills.map((s) => s.slug);
+    assert.ok(resolvedSlugs.includes("base-only-skill"),
+      "resolved spec should include base skill");
+    assert.ok(resolvedSlugs.includes("imported-skill"),
+      "resolved spec should include imported skill");
+
+    // The base file must be untouched
+    const baseAfter = JSON.parse(readFileSync(join(tempDir, "base.yaml"), "utf8"));
+    const baseSlugs = baseAfter.skills.map((s) => s.slug);
+    assert.ok(baseSlugs.includes("base-only-skill"));
+    assert.ok(!baseSlugs.includes("imported-skill"),
+      "base file must NOT be modified by import into overlay");
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("import-skill detects collision with base-layer skill via resolved lookup", () => {
+  const tempDir = makeTempDir();
+  try {
+    const base = makeMinimalSpec({
+      skills: [makeSkillFixture({ slug: "shared-skill" })],
+    });
+    writeSpec(tempDir, base, "base.yaml");
+
+    const overlay = {
+      extends: "./base.yaml",
+      project: { name: "Overlay" },
+    };
+    const overlayPath = writeSpec(tempDir, overlay, "overlay.yaml");
+
+    // Build a skill with the same slug as the base skill
+    const skillDir = join(tempDir, "clash-skill");
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(
+      join(skillDir, "SKILL.md"),
+      [
+        "---",
+        'name: "shared-skill"',
+        'description: "Collides with base"',
+        "---",
+        "",
+        "# Shared Skill",
+        "",
+        "Override content.",
+      ].join("\n"),
+      "utf8",
+    );
+
+    // Without --replace, should skip because it exists in the base
+    const result = runCli([
+      "import-skill", "--spec", overlayPath, "--skill", skillDir,
+    ]);
+    expectSuccess(result);
+    assert.match(result.stdout, /Skipped.*shared-skill/,
+      "Should detect collision with base-layer skill");
+
+    // With --replace, should materialize the override in the leaf
+    const replaceResult = runCli([
+      "import-skill", "--spec", overlayPath, "--skill", skillDir, "--replace",
+    ]);
+    expectSuccess(replaceResult);
+    assert.match(replaceResult.stdout, /Replaced.*shared-skill/);
+
+    const writtenOverlay = JSON.parse(readFileSync(overlayPath, "utf8"));
+    assert.equal(writtenOverlay.extends, "./base.yaml");
+    const overlaySlugs = (writtenOverlay.skills ?? []).map((s) => s.slug);
+    assert.ok(overlaySlugs.includes("shared-skill"),
+      "override should be materialized in the leaf");
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("resolveLayeredSpecWithMeta: single spec without extends reports isLayered false", () => {
+  const tempDir = makeTempDir();
+  try {
+    const spec = makeMinimalSpec();
+    const specPath = writeSpec(tempDir, spec);
+
+    const meta = resolveLayeredSpecWithMeta(specPath);
+    assert.equal(meta.isLayered, false);
+    assert.equal(meta.chain.length, 1);
+    assert.deepEqual(meta.merged.project, spec.project);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("update-skills on overlay spec preserves extends and writes only to the leaf", () => {
+  const tempDir = makeTempDir();
+  try {
+    const base = makeMinimalSpec({
+      skills: [makeSkillFixture({ slug: "inherited-skill", version: "1.0.0" })],
+    });
+    writeSpec(tempDir, base, "base.yaml");
+
+    const overlay = {
+      extends: "./base.yaml",
+      project: { name: "Overlay" },
+    };
+    const overlayPath = writeSpec(tempDir, overlay, "overlay.yaml");
+
+    const skillDir = makeSkillMdDir(
+      tempDir,
+      "inherited-skill",
+      "2.0.0",
+      "Updated rule from overlay refresh.",
+    );
+
+    writeFileSync(join(tempDir, "agent-jump-start.lock.json"), `${JSON.stringify({
+      schemaVersion: 1,
+      generatedBy: "Agent Jump Start vtest",
+      skills: [
+        {
+          slug: "inherited-skill",
+          version: "1.0.0",
+          sourceType: "local-directory",
+          source: "./inherited-skill",
+          resolvedFrom: "./inherited-skill",
+          checksum: "sha256:bogus",
+          importedAt: "2026-04-09T00:00:00.000Z",
+        },
+      ],
+    }, null, 2)}\n`, "utf8");
+
+    const result = runCli(["update-skills", "--spec", overlayPath]);
+    expectSuccess(result);
+    assert.match(result.stdout, /Updated:/);
+    assert.match(result.stdout, /inherited-skill/);
+
+    const writtenOverlay = JSON.parse(readFileSync(overlayPath, "utf8"));
+    assert.equal(writtenOverlay.extends, "./base.yaml");
+    assert.equal(writtenOverlay.schemaVersion, undefined);
+    assert.ok((writtenOverlay.skills ?? []).some((s) => s.slug === "inherited-skill"));
+
+    const baseAfter = JSON.parse(readFileSync(join(tempDir, "base.yaml"), "utf8"));
+    assert.equal(baseAfter.skills[0].version, "1.0.0");
   } finally {
     cleanupTempDir(tempDir);
   }

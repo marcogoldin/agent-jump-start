@@ -18,7 +18,7 @@ import { diagnoseSpec } from "../lib/doctor.mjs";
 import { defaultLockfilePath, makeProvenanceRecord, writeLockfileEntries } from "../lib/lockfile.mjs";
 import { makeLocalSourceInfo } from "../lib/source-info.mjs";
 import { refreshSkills } from "../lib/skills-updater.mjs";
-import { resolveLayeredSpec } from "../lib/merging.mjs";
+import { resolveLayeredSpec, resolveLayeredSpecWithMeta } from "../lib/merging.mjs";
 
 // ---------------------------------------------------------------------------
 // Usage
@@ -144,22 +144,40 @@ async function main() {
       throw new Error(`Canonical spec not found: ${specPath}. Run bootstrap first.`);
     }
 
-    const spec = readJsonYaml(specPathInput);
-    const importedSkills = readExternalSkill(sourcePathInput);
+    // Resolve the full layer chain for collision detection (includes
+    // inherited skills from base layers).  Read the raw leaf file
+    // separately — that is the only file we write back to.
+    const { merged: resolvedSpec } = resolveLayeredSpecWithMeta(specPathInput);
+    const resolvedSkills = resolvedSpec.skills ?? [];
 
-    if (!Array.isArray(spec.skills)) {
-      spec.skills = [];
+    const rawLeaf = readJsonYaml(specPathInput);
+    if (!Array.isArray(rawLeaf.skills)) {
+      rawLeaf.skills = [];
     }
+
+    const importedSkills = readExternalSkill(sourcePathInput);
 
     let added = 0;
     let replaced = 0;
     const lockEntries = [];
     for (const skill of importedSkills) {
       validateSkill(skill, sourcePathInput);
-      const existingIndex = spec.skills.findIndex((s) => s.slug === skill.slug);
-      if (existingIndex >= 0) {
+
+      // Check existence against the resolved (effective) spec so we
+      // detect collisions with skills inherited from base layers.
+      const existsInResolved = resolvedSkills.some((s) => s.slug === skill.slug);
+      // Also check the leaf to find the correct index for replacement.
+      const leafIndex = rawLeaf.skills.findIndex((s) => s.slug === skill.slug);
+
+      if (existsInResolved) {
         if (replaceExisting) {
-          spec.skills[existingIndex] = skill;
+          if (leafIndex >= 0) {
+            rawLeaf.skills[leafIndex] = skill;
+          } else {
+            // Skill lives in a base layer — materialize the override
+            // into the leaf so the base file is never touched.
+            rawLeaf.skills.push(skill);
+          }
           replaced += 1;
           console.log(`  Replaced: ${skill.slug} (v${skill.version})`);
           if (sourceInfo) {
@@ -173,7 +191,7 @@ async function main() {
         if (!skill.author) {
           skill.author = "Imported";
         }
-        spec.skills.push(skill);
+        rawLeaf.skills.push(skill);
         added += 1;
         console.log(`  Added:    ${skill.slug} (v${skill.version})`);
         if (sourceInfo) {
@@ -182,15 +200,17 @@ async function main() {
       }
     }
 
-    writeFileSync(specPath, stringifyJsonYaml(spec), "utf8");
+    // Write back only the leaf file — preserves `extends` and all
+    // other fields that belong to the leaf layer.
+    writeFileSync(specPath, stringifyJsonYaml(rawLeaf), "utf8");
     if (lockEntries.length > 0) {
       const lockfilePath = defaultLockfilePath(specPathInput);
       writeLockfileEntries(lockfilePath, lockEntries);
       console.log(`Lockfile updated: ${relative(process.cwd(), lockfilePath) || lockfilePath}`);
     }
     console.log(`\nImport complete: ${added} added, ${replaced} replaced in ${specPathInput}`);
-    console.log(`Total skills in spec: ${spec.skills.length}`);
-    console.log(`\nRun 'render' to regenerate instruction files for all ${AGENT_COUNT} agents.`);
+    console.log(`Total skills in leaf spec: ${rawLeaf.skills.length}`);
+    console.log(`\nRun 'sync' to regenerate instruction files for all ${AGENT_COUNT} agents.`);
   }
 
   // -------------------------------------------------------------------
@@ -601,7 +621,7 @@ async function main() {
     assertRequired(options, "slug", command);
     assertRequired(options, "output", command);
 
-    const spec = readJsonYaml(options.spec);
+    const spec = resolveLayeredSpec(options.spec);
     validateSpec(spec, options.spec);
 
     const skill = (spec.skills ?? []).find((s) => s.slug === options.slug);

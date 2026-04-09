@@ -163,15 +163,16 @@ git commit -m "sync: update agent instructions from canonical spec"
 
 `extends`-based layered specs are the current scaling priority and are under active development.
 
-Current intent:
+What works now:
 
-- resolve overlays for `sync`, `doctor`, `render`, `check`, and `validate`
+- resolve overlays for `sync`, `doctor`, `render`, `check`, `validate`, `export-skill`, and `update-skills`
 - keep merge behavior explicit and deterministic instead of relying on generic deep merge
-- make base-plus-overlay setups practical for monorepos and shared governance
+- fail fast on malformed keyed overlay arrays instead of normalizing them silently
+- preserve `extends` during write workflows by writing only to the raw leaf spec for `import-skill` and `update-skills`
 
 Current limitation:
 
-- layered specs should still be treated as experimental until skill-oriented workflows such as `export-skill` and `update-skills` follow the same resolution model, and keyed overlay entries fail validation instead of being normalized silently
+- layered specs should still be treated as maturing until monorepo governance rules are explicit, especially for ownership policy, subtree boundaries, and when leaf materialization is preferred over base-layer mutation
 
 For the current implementation priority and hardening criteria, see `docs/implementation-prompts/agent-jump-start-roadmap.md`.
 
@@ -434,7 +435,7 @@ agent-jump-start export-schema --output canonical-spec.schema.json
 
 ## Current Limitations
 
-- Monorepo overlays are not implemented yet.
+- Layered specs (`extends`) are functional and write-safe for current workflows, but monorepo governance and ownership policy are not fully defined yet.
 - Continue, Aider, Windsurf, Cline, and Roo Code do not receive native skill packages; they receive mirrored workspace guidance plus inline skill summaries.
 - Remote skill import is currently limited to GitHub sources plus `skills` and `skillfish` adapters. Generic registries are not implemented yet.
 - Skills installed directly by third-party CLIs into `./.agents/skills/` remain unmanaged until they are imported into the canonical spec.
@@ -458,7 +459,7 @@ and reimplement the renderer elsewhere.
 npm test
 ```
 
-103 tests covering core workflows, sync command, doctor diagnostics, guided onboarding, project introspection, skill import/export, provenance lockfiles, `update-skills` refresh flows, progressive disclosure, high-level source adapters, semantic classification, mirror sync integrity, and round-trip stability.
+132 tests covering core workflows, sync command, doctor diagnostics, layered specs, writeback semantics, guided onboarding, project introspection, skill import/export, provenance lockfiles, `update-skills` refresh flows, progressive disclosure, high-level source adapters, semantic classification, mirror sync integrity, and round-trip stability.
 
 ## Contributing
 
