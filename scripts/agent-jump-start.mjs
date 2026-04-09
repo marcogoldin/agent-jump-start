@@ -15,6 +15,8 @@ import { readExternalSkill, readSkillMdFile, readSkillDirectory, exportSkillPack
 import { CANONICAL_SPEC_SCHEMA } from "../lib/schema.mjs";
 import { runGuidedSetup } from "../lib/interactive.mjs";
 import { diagnoseSpec } from "../lib/doctor.mjs";
+import { defaultLockfilePath, makeProvenanceRecord, writeLockfileEntries } from "../lib/lockfile.mjs";
+import { makeLocalSourceInfo } from "../lib/source-info.mjs";
 
 // ---------------------------------------------------------------------------
 // Usage
@@ -124,7 +126,7 @@ async function main() {
 
   const { command, options } = parseArgs(args);
 
-  function importSkillsIntoSpec(specPathInput, sourcePathInput, replaceExisting = false) {
+  function importSkillsIntoSpec(specPathInput, sourcePathInput, replaceExisting = false, sourceInfo = null) {
     const specPath = resolve(specPathInput);
     if (!existsSync(specPath)) {
       throw new Error(`Canonical spec not found: ${specPath}. Run bootstrap first.`);
@@ -139,6 +141,7 @@ async function main() {
 
     let added = 0;
     let replaced = 0;
+    const lockEntries = [];
     for (const skill of importedSkills) {
       validateSkill(skill, sourcePathInput);
       const existingIndex = spec.skills.findIndex((s) => s.slug === skill.slug);
@@ -147,6 +150,9 @@ async function main() {
           spec.skills[existingIndex] = skill;
           replaced += 1;
           console.log(`  Replaced: ${skill.slug} (v${skill.version})`);
+          if (sourceInfo) {
+            lockEntries.push(makeProvenanceRecord(skill, sourcePathInput, sourceInfo, specPathInput));
+          }
         } else {
           console.log(`  Skipped:  ${skill.slug} (already exists, use --replace to overwrite)`);
           continue;
@@ -158,10 +164,18 @@ async function main() {
         spec.skills.push(skill);
         added += 1;
         console.log(`  Added:    ${skill.slug} (v${skill.version})`);
+        if (sourceInfo) {
+          lockEntries.push(makeProvenanceRecord(skill, sourcePathInput, sourceInfo, specPathInput));
+        }
       }
     }
 
     writeFileSync(specPath, stringifyJsonYaml(spec), "utf8");
+    if (lockEntries.length > 0) {
+      const lockfilePath = defaultLockfilePath(specPathInput);
+      writeLockfileEntries(lockfilePath, lockEntries);
+      console.log(`Lockfile updated: ${relative(process.cwd(), lockfilePath) || lockfilePath}`);
+    }
     console.log(`\nImport complete: ${added} added, ${replaced} replaced in ${specPathInput}`);
     console.log(`Total skills in spec: ${spec.skills.length}`);
     console.log(`\nRun 'render' to regenerate instruction files for all ${AGENT_COUNT} agents.`);
@@ -192,6 +206,8 @@ async function main() {
       "lib/introspection.mjs",
       "lib/interactive.mjs",
       "lib/doctor.mjs",
+      "lib/lockfile.mjs",
+      "lib/source-info.mjs",
       "specs/base-spec.yaml",
       "prompts/01-bootstrap-any-agent.md",
       "prompts/02-change-stack-or-guidelines.md",
@@ -530,7 +546,7 @@ async function main() {
   if (command === "import-skill") {
     assertRequired(options, "spec", command);
     assertRequired(options, "skill", command);
-    importSkillsIntoSpec(options.spec, options.skill, Boolean(options.replace));
+    importSkillsIntoSpec(options.spec, options.skill, Boolean(options.replace), makeLocalSourceInfo(options.skill));
     return;
   }
 
@@ -554,7 +570,7 @@ async function main() {
 
       console.log(`Resolved skill source: ${resolved.sourceLabel}`);
       console.log(`  Import path: ${resolved.importPath}`);
-      importSkillsIntoSpec(options.spec, resolved.importPath, Boolean(options.replace));
+      importSkillsIntoSpec(options.spec, resolved.importPath, Boolean(options.replace), resolved.sourceInfo ?? null);
     } finally {
       if (cleanupPath) {
         rmSync(cleanupPath, { recursive: true, force: true });

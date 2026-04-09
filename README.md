@@ -151,6 +151,7 @@ agent-jump-start doctor \
 
 ```bash
 git add docs/agent-jump-start/canonical-spec.yaml \
+  docs/agent-jump-start/agent-jump-start.lock.json \
   .agents/ .claude/ .github/ .cursor/ .roo/ .continue/ \
   AGENTS.md CLAUDE.md .windsurfrules .clinerules CONVENTIONS.md \
   docs/agent-review-checklist.md
@@ -186,6 +187,8 @@ Supported import sources:
 - An installed skill package (e.g. `.agents/skills/python-pro/`)
 - A standalone `SKILL.md` file
 - A legacy JSON skill file
+
+Each successful `import-skill` run also updates `agent-jump-start.lock.json` next to the spec. The lockfile records the imported skill slug, version, checksum, source, and resolved path so future refresh workflows can be audited and reproduced safely.
 
 ### Add a skill from a higher-level source
 
@@ -233,6 +236,7 @@ Notes:
 - `skills:` and `skillfish:` adapters require `npx` on `PATH`.
 - GitHub sources require `git` on `PATH`.
 - If a third-party tool already wrote a skill into `./.agents/skills/`, import that path into the spec so it becomes managed by Agent Jump Start.
+- Successful `add-skill` imports also update `agent-jump-start.lock.json` next to the spec with provenance metadata for each imported skill.
 
 ### Validate a skill before import
 
@@ -308,6 +312,7 @@ CLAUDE.md
 CONVENTIONS.md
 docs/agent-review-checklist.md
 docs/agent-jump-start/generated-manifest.json
+docs/agent-jump-start/agent-jump-start.lock.json
 ```
 
 ## Minimal Spec Example
@@ -390,9 +395,9 @@ agent-jump-start export-schema --output canonical-spec.schema.json
 
 ## Current Limitations
 
-- Monorepo overlays and lockfiles are not implemented.
+- Monorepo overlays are not implemented yet.
 - Continue, Aider, Windsurf, Cline, and Roo Code do not receive native skill packages; they receive mirrored workspace guidance plus inline skill summaries.
-- Remote skill import is currently limited to GitHub sources plus `skills` and `skillfish` adapters. Generic registries and provenance lockfiles are not implemented yet.
+- Remote skill import is currently limited to GitHub sources plus `skills` and `skillfish` adapters. Generic registries and a first-class `update-skills` refresh workflow are not implemented yet.
 - Skills installed directly by third-party CLIs into `./.agents/skills/` remain unmanaged until they are imported into the canonical spec.
 - Direct `npx @marcogoldin/agent-jump-start@latest ...` execution may not resolve the published bin consistently across npm environments; global install and vendored usage are the most reliable paths today.
 
@@ -414,7 +419,7 @@ and reimplement the renderer elsewhere.
 npm test
 ```
 
-95 tests covering core workflows, sync command, doctor diagnostics, guided onboarding, project introspection, skill import/export, progressive disclosure, high-level source adapters, semantic classification, mirror sync integrity, and round-trip stability.
+97 tests covering core workflows, sync command, doctor diagnostics, guided onboarding, project introspection, skill import/export, provenance lockfiles, progressive disclosure, high-level source adapters, semantic classification, mirror sync integrity, and round-trip stability.
 
 ## Contributing
 

@@ -59,6 +59,10 @@ function writeSpec(tempDir, spec, filename = "spec.yaml") {
   return path;
 }
 
+function readLockfile(tempDir, filename = "agent-jump-start.lock.json") {
+  return JSON.parse(readFileSync(join(tempDir, filename), "utf8"));
+}
+
 function makeExecutable(tempDir, name, content) {
   const scriptPath = join(tempDir, name);
   writeFileSync(scriptPath, content, "utf8");
@@ -157,6 +161,9 @@ test("init copies lib/ modules for modular imports", () => {
     assert.ok(existsSync(join(ajsDir, "lib/files.mjs")), "lib/files.mjs should exist");
     assert.ok(existsSync(join(ajsDir, "lib/skills.mjs")), "lib/skills.mjs should exist");
     assert.ok(existsSync(join(ajsDir, "lib/schema.mjs")), "lib/schema.mjs should exist");
+    assert.ok(existsSync(join(ajsDir, "lib/doctor.mjs")), "lib/doctor.mjs should exist");
+    assert.ok(existsSync(join(ajsDir, "lib/lockfile.mjs")), "lib/lockfile.mjs should exist");
+    assert.ok(existsSync(join(ajsDir, "lib/source-info.mjs")), "lib/source-info.mjs should exist");
   } finally {
     cleanupTempDir(tempDir);
   }
@@ -510,6 +517,15 @@ An externally authored skill for import testing.
     assert.ok(skill.references?.length >= 1);
     assert.equal(skill.references[0].name, "advanced.md");
     assert.match(skill.references[0].content, /Advanced content/);
+
+    const lockfile = readLockfile(tempDir);
+    assert.equal(lockfile.schemaVersion, 1);
+    assert.equal(lockfile.skills.length, 1);
+    assert.equal(lockfile.skills[0].slug, "imported-skill");
+    assert.equal(lockfile.skills[0].sourceType, "local-directory");
+    assert.equal(lockfile.skills[0].provider, "local");
+    assert.equal(lockfile.skills[0].source, skillDir);
+    assert.match(lockfile.skills[0].checksum, /^sha256:/);
   } finally {
     cleanupTempDir(tempDir);
   }
@@ -599,6 +615,44 @@ Local add-skill smoke test.
     const spec = JSON.parse(readFileSync(specPath, "utf8"));
     assert.equal(spec.skills.length, 1);
     assert.equal(spec.skills[0].slug, "local-added-skill");
+
+    const lockfile = readLockfile(tempDir);
+    assert.equal(lockfile.skills.length, 1);
+    assert.equal(lockfile.skills[0].slug, "local-added-skill");
+    assert.equal(lockfile.skills[0].sourceType, "local-directory");
+    assert.equal(lockfile.skills[0].provider, "local");
+    assert.equal(lockfile.skills[0].source, skillDir);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("add-skill preserves local SKILL.md file provenance in the lockfile", () => {
+  const tempDir = makeTempDir();
+  try {
+    const skillMdPath = join(tempDir, "standalone-skill.md");
+    writeFileSync(skillMdPath, `---
+name: local-file-skill
+description: Local file add-skill smoke test.
+metadata:
+  version: "1.0.0"
+---
+
+# Local File Skill
+
+Standalone SKILL.md fixture.
+`, "utf8");
+
+    const specPath = join(tempDir, "spec.yaml");
+    expectSuccess(runCli(["bootstrap", "--base", "specs/base-spec.yaml", "--output", specPath]));
+    expectSuccess(runCli(["add-skill", skillMdPath, "--spec", specPath]));
+
+    const lockfile = readLockfile(tempDir);
+    assert.equal(lockfile.skills.length, 1);
+    assert.equal(lockfile.skills[0].slug, "local-file-skill");
+    assert.equal(lockfile.skills[0].sourceType, "local-skill-md");
+    assert.equal(lockfile.skills[0].provider, "local");
+    assert.equal(lockfile.skills[0].source, skillMdPath);
   } finally {
     cleanupTempDir(tempDir);
   }
@@ -754,6 +808,67 @@ exit 1
     assert.equal(spec.skills.length, 1);
     assert.equal(spec.skills[0].slug, "github-skill");
     assert.equal(spec.skills[0].version, "3.0.0");
+
+    const lockfile = readLockfile(tempDir);
+    assert.equal(lockfile.skills.length, 1);
+    assert.equal(lockfile.skills[0].slug, "github-skill");
+    assert.equal(lockfile.skills[0].sourceType, "github");
+    assert.equal(lockfile.skills[0].provider, "github");
+    assert.equal(lockfile.skills[0].source, "https://github.com/example/repo/tree/main/skills/github-skill");
+    assert.equal(lockfile.skills[0].treePath, "skills/github-skill");
+    assert.match(lockfile.skills[0].repoUrl, /^https:\/\/github\.com\/example\/repo\.git$/);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("import-skill --replace updates the existing lockfile entry instead of duplicating it", () => {
+  const tempDir = makeTempDir();
+  try {
+    const skillDir = join(tempDir, "replace-skill");
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(join(skillDir, "SKILL.md"), `---
+name: replaceable-skill
+description: Replace test skill.
+metadata:
+  version: "1.0.0"
+---
+
+# Replaceable Skill
+
+## When to Use This Skill
+
+- Testing replace
+`, "utf8");
+
+    const specPath = join(tempDir, "spec.yaml");
+    expectSuccess(runCli(["bootstrap", "--base", "specs/base-spec.yaml", "--output", specPath]));
+    expectSuccess(runCli(["import-skill", "--spec", specPath, "--skill", skillDir]));
+    const firstLockfile = readLockfile(tempDir);
+    assert.equal(firstLockfile.skills.length, 1);
+    const firstImportedAt = firstLockfile.skills[0].importedAt;
+
+    writeFileSync(join(skillDir, "SKILL.md"), `---
+name: replaceable-skill
+description: Replace test skill updated.
+metadata:
+  version: "2.0.0"
+---
+
+# Replaceable Skill
+
+## When to Use This Skill
+
+- Testing replace
+- Updated source
+`, "utf8");
+
+    expectSuccess(runCli(["import-skill", "--spec", specPath, "--skill", skillDir, "--replace"]));
+    const secondLockfile = readLockfile(tempDir);
+    assert.equal(secondLockfile.skills.length, 1);
+    assert.equal(secondLockfile.skills[0].slug, "replaceable-skill");
+    assert.equal(secondLockfile.skills[0].version, "2.0.0");
+    assert.notEqual(secondLockfile.skills[0].importedAt, firstImportedAt);
   } finally {
     cleanupTempDir(tempDir);
   }
