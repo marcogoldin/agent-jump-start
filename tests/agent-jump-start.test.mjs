@@ -2829,3 +2829,218 @@ test("init --guided copies introspection and interactive modules to target", () 
     cleanupTempDir(tempDir);
   }
 });
+
+// ===========================================================================
+// update-skills tests
+// ===========================================================================
+
+function makeSkillMdDir(parentDir, slug, version, ruleText) {
+  const skillDir = join(parentDir, slug);
+  mkdirSync(skillDir, { recursive: true });
+  writeFileSync(join(skillDir, "SKILL.md"), `---
+name: ${slug}
+description: Skill ${slug} for testing update-skills.
+metadata:
+  version: "${version}"
+  author: test-author
+---
+# ${slug}
+
+## Rules
+
+- ${ruleText}
+`, "utf8");
+  return skillDir;
+}
+
+test("update-skills reports up-to-date when source has not changed", () => {
+  const tempDir = makeTempDir();
+  try {
+    const specPath = join(tempDir, "spec.yaml");
+    expectSuccess(runCli(["bootstrap", "--base", "specs/base-spec.yaml", "--output", specPath]));
+
+    const skillDir = makeSkillMdDir(tempDir, "stable-skill", "1.0.0", "Keep things stable.");
+    expectSuccess(runCli(["import-skill", "--spec", specPath, "--skill", skillDir]));
+
+    const result = runCli(["update-skills", "--spec", specPath]);
+    expectSuccess(result);
+    assert.match(result.stdout, /1 up-to-date/);
+    assert.match(result.stdout, /0 updated/);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("update-skills detects changed source and applies update", () => {
+  const tempDir = makeTempDir();
+  try {
+    const specPath = join(tempDir, "spec.yaml");
+    expectSuccess(runCli(["bootstrap", "--base", "specs/base-spec.yaml", "--output", specPath]));
+
+    const skillDir = makeSkillMdDir(tempDir, "evolving-skill", "1.0.0", "Original rule.");
+    expectSuccess(runCli(["import-skill", "--spec", specPath, "--skill", skillDir]));
+
+    const lockBefore = readLockfile(tempDir);
+    const checksumBefore = lockBefore.skills.find((s) => s.slug === "evolving-skill").checksum;
+
+    // Modifica la skill upstream
+    writeFileSync(join(skillDir, "SKILL.md"), `---
+name: evolving-skill
+description: Skill evolving-skill for testing update-skills.
+metadata:
+  version: "2.0.0"
+  author: test-author
+---
+# evolving-skill
+
+## Rules
+
+- Updated rule with more content.
+- A brand new rule.
+`, "utf8");
+
+    const result = runCli(["update-skills", "--spec", specPath]);
+    expectSuccess(result);
+    assert.match(result.stdout, /evolving-skill/);
+    assert.match(result.stdout, /1\.0\.0.*2\.0\.0/);
+    assert.match(result.stdout, /1 updated/);
+
+    // Il lockfile deve avere un checksum aggiornato
+    const lockAfter = readLockfile(tempDir);
+    const checksumAfter = lockAfter.skills.find((s) => s.slug === "evolving-skill").checksum;
+    assert.notEqual(checksumAfter, checksumBefore, "Checksum should change after update");
+
+    // La spec deve contenere la skill v2
+    const spec = JSON.parse(readFileSync(specPath, "utf8"));
+    const skill = spec.skills.find((s) => s.slug === "evolving-skill");
+    assert.equal(skill.version, "2.0.0");
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("update-skills --dry-run does not modify files", () => {
+  const tempDir = makeTempDir();
+  try {
+    const specPath = join(tempDir, "spec.yaml");
+    expectSuccess(runCli(["bootstrap", "--base", "specs/base-spec.yaml", "--output", specPath]));
+
+    const skillDir = makeSkillMdDir(tempDir, "preview-skill", "1.0.0", "Rule before.");
+    expectSuccess(runCli(["import-skill", "--spec", specPath, "--skill", skillDir]));
+
+    const specContentBefore = readFileSync(specPath, "utf8");
+    const lockBefore = readFileSync(join(tempDir, "agent-jump-start.lock.json"), "utf8");
+
+    // Modifica la skill upstream
+    writeFileSync(join(skillDir, "SKILL.md"), `---
+name: preview-skill
+description: Skill preview-skill for testing update-skills.
+metadata:
+  version: "2.0.0"
+  author: test-author
+---
+# preview-skill
+
+## Rules
+
+- Completely new rule.
+`, "utf8");
+
+    const result = runCli(["update-skills", "--spec", specPath, "--dry-run"]);
+    expectSuccess(result);
+    assert.match(result.stdout, /Dry-run/);
+    assert.match(result.stdout, /would change/);
+
+    // Nessun file deve essere cambiato
+    assert.equal(readFileSync(specPath, "utf8"), specContentBefore);
+    assert.equal(readFileSync(join(tempDir, "agent-jump-start.lock.json"), "utf8"), lockBefore);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("update-skills warns on unreachable source without failing", () => {
+  const tempDir = makeTempDir();
+  try {
+    const specPath = join(tempDir, "spec.yaml");
+    expectSuccess(runCli(["bootstrap", "--base", "specs/base-spec.yaml", "--output", specPath]));
+
+    const skillDir = makeSkillMdDir(tempDir, "vanishing-skill", "1.0.0", "I will vanish.");
+    expectSuccess(runCli(["import-skill", "--spec", specPath, "--skill", skillDir]));
+
+    // Rimuovi la sorgente
+    rmSync(skillDir, { recursive: true, force: true });
+
+    const result = runCli(["update-skills", "--spec", specPath]);
+    expectSuccess(result);
+    assert.match(result.stdout, /[Uu]nreachable/);
+    assert.match(result.stdout, /vanishing-skill/);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("update-skills --skill filters to a single skill", () => {
+  const tempDir = makeTempDir();
+  try {
+    const specPath = join(tempDir, "spec.yaml");
+    expectSuccess(runCli(["bootstrap", "--base", "specs/base-spec.yaml", "--output", specPath]));
+
+    const skillA = makeSkillMdDir(tempDir, "skill-a", "1.0.0", "Rule A.");
+    const skillB = makeSkillMdDir(tempDir, "skill-b", "1.0.0", "Rule B.");
+    expectSuccess(runCli(["import-skill", "--spec", specPath, "--skill", skillA]));
+    expectSuccess(runCli(["import-skill", "--spec", specPath, "--skill", skillB]));
+
+    // Modifica solo skill-b
+    writeFileSync(join(skillB, "SKILL.md"), `---
+name: skill-b
+description: Skill skill-b for testing update-skills.
+metadata:
+  version: "2.0.0"
+  author: test-author
+---
+# skill-b
+
+## Rules
+
+- Updated rule B.
+`, "utf8");
+
+    const result = runCli(["update-skills", "--spec", specPath, "--skill", "skill-b"]);
+    expectSuccess(result);
+    assert.match(result.stdout, /skill-b/);
+    assert.match(result.stdout, /1 updated/);
+    assert.doesNotMatch(result.stdout, /skill-a/);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("update-skills exits non-zero when refresh reports internal errors", () => {
+  const tempDir = makeTempDir();
+  try {
+    const specPath = writeSpec(tempDir, makeMinimalSpec({ skills: [] }));
+    writeFileSync(join(tempDir, "agent-jump-start.lock.json"), `${JSON.stringify({
+      schemaVersion: 1,
+      generatedBy: "Agent Jump Start vtest",
+      skills: [
+        {
+          slug: "broken-skill",
+          version: "1.0.0",
+          sourceType: "unsupported-provider",
+          source: "broken-source",
+          checksum: "sha256:test",
+          importedAt: "2026-04-09T00:00:00.000Z",
+        },
+      ],
+    }, null, 2)}\n`, "utf8");
+
+    const result = runCli(["update-skills", "--spec", specPath]);
+    expectFailure(result);
+    assert.match(result.stdout, /Errors:/);
+    assert.match(result.stdout, /broken-skill/);
+    assert.match(result.stdout, /1 error/);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});

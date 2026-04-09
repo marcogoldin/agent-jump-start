@@ -17,6 +17,7 @@ import { runGuidedSetup } from "../lib/interactive.mjs";
 import { diagnoseSpec } from "../lib/doctor.mjs";
 import { defaultLockfilePath, makeProvenanceRecord, writeLockfileEntries } from "../lib/lockfile.mjs";
 import { makeLocalSourceInfo } from "../lib/source-info.mjs";
+import { refreshSkills } from "../lib/skills-updater.mjs";
 
 // ---------------------------------------------------------------------------
 // Usage
@@ -38,6 +39,7 @@ Commands:
   add-skill      <source> --spec <path> [--skill <name>] [--replace] [--provider <name>]
   export-skill   --spec <path> --slug <slug> --output <path>
   export-schema  [--output <path>]
+  update-skills  --spec <path> [--skill <slug>] [--dry-run]
   list-agents
   list-profiles
 
@@ -90,6 +92,15 @@ Examples:
     --output ./exported-skills/react-best-practices
 
   node scripts/agent-jump-start.mjs export-schema
+
+  node scripts/agent-jump-start.mjs update-skills \\
+    --spec canonical-spec.yaml
+
+  node scripts/agent-jump-start.mjs update-skills \\
+    --spec canonical-spec.yaml --dry-run
+
+  node scripts/agent-jump-start.mjs update-skills \\
+    --spec canonical-spec.yaml --skill python-pro
 
   node scripts/agent-jump-start.mjs list-agents
   node scripts/agent-jump-start.mjs list-profiles
@@ -208,6 +219,7 @@ async function main() {
       "lib/doctor.mjs",
       "lib/lockfile.mjs",
       "lib/source-info.mjs",
+      "lib/skills-updater.mjs",
       "specs/base-spec.yaml",
       "prompts/01-bootstrap-any-agent.md",
       "prompts/02-change-stack-or-guidelines.md",
@@ -603,6 +615,70 @@ async function main() {
     console.log(`Exported skill "${skill.slug}" to ${options.output}:`);
     for (const file of created) {
       console.log(`  ${file}`);
+    }
+    return;
+  }
+
+  // -------------------------------------------------------------------
+  // update-skills
+  // -------------------------------------------------------------------
+  if (command === "update-skills") {
+    assertRequired(options, "spec", command);
+    const specPath = resolve(options.spec);
+    const lockfilePath = defaultLockfilePath(options.spec);
+    const dryRun = Boolean(options["dry-run"]);
+    const slugFilter = options.skill ?? null;
+
+    if (dryRun) {
+      console.log("Dry-run mode: no files will be modified.\n");
+    }
+
+    const results = refreshSkills({ specPath, lockfilePath, dryRun, slugFilter });
+
+    const upToDate = results.filter((r) => r.status === "up-to-date");
+    const changed = results.filter((r) => r.status === "changed");
+    const unreachable = results.filter((r) => r.status === "unreachable");
+    const errors = results.filter((r) => r.status === "error");
+
+    if (changed.length > 0) {
+      console.log(dryRun ? "Would update:" : "Updated:");
+      for (const r of changed) {
+        console.log(`  ${r.slug}  ${r.oldVersion ?? "?"} → ${r.newVersion ?? "?"}`);
+        if (r.message) {
+          for (const line of r.message.split("\n")) {
+            console.log(`    ${line}`);
+          }
+        }
+      }
+      console.log("");
+    }
+
+    if (unreachable.length > 0) {
+      console.log("Unreachable sources (skipped):");
+      for (const r of unreachable) {
+        console.log(`  ${r.slug}: ${r.message}`);
+      }
+      console.log("");
+    }
+
+    if (errors.length > 0) {
+      console.log("Errors:");
+      for (const r of errors) {
+        console.log(`  ${r.slug}: ${r.message}`);
+      }
+      console.log("");
+    }
+
+    console.log(
+      `Summary: ${upToDate.length} up-to-date, ${changed.length} ${dryRun ? "would change" : "updated"}, ` +
+      `${unreachable.length} unreachable, ${errors.length} error(s)`,
+    );
+
+    if (!dryRun && changed.length > 0) {
+      console.log(`\nRun 'render' to regenerate instruction files for all ${AGENT_COUNT} agents.`);
+    }
+    if (errors.length > 0) {
+      process.exitCode = 1;
     }
     return;
   }
