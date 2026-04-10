@@ -20,6 +20,8 @@ import { makeLocalSourceInfo } from "../lib/source-info.mjs";
 import { refreshSkills } from "../lib/skills-updater.mjs";
 import { resolveLayeredSpec, resolveLayeredSpecWithMeta } from "../lib/merging.mjs";
 import { discoverUnmanagedSkills, KNOWN_SKILL_DIRS } from "../lib/intake.mjs";
+import { deepIntrospect } from "../lib/introspection.mjs";
+import { inferValidation, inferSections, inferChecklist } from "../lib/inference.mjs";
 
 // ---------------------------------------------------------------------------
 // Usage
@@ -32,7 +34,8 @@ Commands:
   init           [--guided] [--profile <path>] [--target <path>]
   bootstrap      --base <path> [--profile <path>] [--output <path>]
   sync           --spec <path> [--target <path>]
-  doctor         --spec <path>
+  infer          --target <path> [--output <path>] [--section <name>] [--format json|text]
+  doctor         --spec <path> [--suggest --target <path>]
   render         --spec <path> [--target <path>] [--clean]
   check          --spec <path> [--target <path>]
   validate       --spec <path>
@@ -62,8 +65,17 @@ Examples:
   node scripts/agent-jump-start.mjs sync \\
     --spec canonical-spec.yaml
 
+  node scripts/agent-jump-start.mjs infer \\
+    --target .
+
+  node scripts/agent-jump-start.mjs infer \\
+    --target . --output inferred-report.json --format json
+
   node scripts/agent-jump-start.mjs doctor \\
     --spec canonical-spec.yaml
+
+  node scripts/agent-jump-start.mjs doctor \\
+    --spec canonical-spec.yaml --suggest --target .
 
   node scripts/agent-jump-start.mjs render \\
     --spec canonical-spec.yaml --target . --clean
@@ -341,6 +353,7 @@ async function main() {
       "lib/interactive.mjs",
       "lib/doctor.mjs",
       "lib/intake.mjs",
+      "lib/inference.mjs",
       "lib/lockfile.mjs",
       "lib/source-info.mjs",
       "lib/skills-updater.mjs",
@@ -481,6 +494,93 @@ async function main() {
   }
 
   // -------------------------------------------------------------------
+  // infer
+  // -------------------------------------------------------------------
+  if (command === "infer") {
+    assertRequired(options, "target", command);
+    const targetRoot = resolve(options.target);
+
+    const evidence = deepIntrospect(targetRoot);
+    const sectionFilter = options.section ?? null;
+
+    const validation = (!sectionFilter || sectionFilter === "validation") ? inferValidation(evidence) : [];
+    const sections = (!sectionFilter || sectionFilter === "rules") ? inferSections(evidence) : [];
+    const checklist = (!sectionFilter || sectionFilter === "checklist") ? inferChecklist(evidence) : null;
+
+    // Determine output format
+    const useJson = options.format === "json" || (options.output && options.format !== "text");
+
+    if (useJson) {
+      const result = {};
+      if (validation.length > 0) result.validation = validation;
+      if (sections.length > 0) result.sections = sections;
+      if (checklist && (checklist.items.length > 0 || checklist.quickSignals.length > 0 || checklist.redFlags.length > 0)) {
+        result.checklist = checklist;
+      }
+
+      const jsonOutput = JSON.stringify(result, null, 2);
+      if (options.output) {
+        const outputPath = resolve(options.output);
+        ensureDirectory(outputPath);
+        writeFileSync(outputPath, jsonOutput + "\n", "utf8");
+        console.log(`Inference report written to: ${displayPath(outputPath)}`);
+      } else {
+        process.stdout.write(jsonOutput + "\n");
+      }
+    } else {
+      // Text output for human review
+      if (validation.length > 0) {
+        console.log("Validation commands:");
+        for (const v of validation) {
+          console.log(`  [${v.provenance}] ${v.value} (from ${v.source})`);
+        }
+        console.log("");
+      }
+      if (sections.length > 0) {
+        console.log("Workspace sections:");
+        for (const s of sections) {
+          console.log(`  ${s.title}:`);
+          for (const r of s.rules) {
+            console.log(`    [${r.provenance}] ${r.value}`);
+          }
+        }
+        console.log("");
+      }
+      if (checklist && (checklist.items.length > 0 || checklist.quickSignals.length > 0 || checklist.redFlags.length > 0)) {
+        console.log("Review checklist:");
+        if (checklist.items.length > 0) {
+          console.log("  Items:");
+          for (const item of checklist.items) {
+            console.log(`    [${item.provenance}] ${item.value}`);
+          }
+        }
+        if (checklist.quickSignals.length > 0) {
+          console.log("  Quick signals:");
+          for (const qs of checklist.quickSignals) {
+            console.log(`    [${qs.provenance}] ${qs.value}`);
+          }
+        }
+        if (checklist.redFlags.length > 0) {
+          console.log("  Red flags:");
+          for (const rf of checklist.redFlags) {
+            console.log(`    [${rf.provenance}] ${rf.value}`);
+          }
+        }
+        console.log("");
+      }
+
+      const totalItems = validation.length + sections.length + (checklist?.items.length ?? 0);
+      if (totalItems === 0) {
+        console.log("No suggestions inferred from this project directory.");
+      } else {
+        console.log(`Found ${validation.length} validation command(s), ${sections.length} section(s), ${checklist?.items.length ?? 0} checklist item(s).`);
+        console.log("Use --format json or --output <path> to export a structured inference report.");
+      }
+    }
+    return;
+  }
+
+  // -------------------------------------------------------------------
   // doctor
   // -------------------------------------------------------------------
   if (command === "doctor") {
@@ -507,6 +607,38 @@ async function main() {
       }
       console.log("");
     }
+
+    // --suggest: run inference and show suggestions alongside warnings
+    if (options.suggest && options.target) {
+      const targetRoot = resolve(options.target);
+      const evidence = deepIntrospect(targetRoot);
+
+      const hasGenericValidation = warnings.some((w) => w.area === "workspaceInstructions.validation");
+      const hasPlaceholderSections = infos.some((i) => i.area === "workspaceInstructions.sections");
+
+      if (hasGenericValidation) {
+        const validation = inferValidation(evidence);
+        if (validation.length > 0) {
+          console.log("Suggested validation commands (from repo evidence):");
+          for (const v of validation) {
+            console.log(`  [${v.provenance}] ${v.value} (from ${v.source})`);
+          }
+          console.log("");
+        }
+      }
+
+      if (hasPlaceholderSections) {
+        const sections = inferSections(evidence);
+        if (sections.length > 0) {
+          console.log("Suggested workspace sections (from repo evidence):");
+          for (const s of sections) {
+            console.log(`  ${s.title}: ${s.rules.length} rule(s)`);
+          }
+          console.log("");
+        }
+      }
+    }
+
     if (findings.length === 0) {
       console.log("No issues found. The spec looks ready for production use.");
     } else {

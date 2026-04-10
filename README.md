@@ -95,12 +95,19 @@ Use `init --guided` when you want Agent Jump Start to inspect the repository and
 agent-jump-start init --guided --target .
 ```
 
-Guided onboarding currently scans for:
+Guided onboarding scans for:
 
 - `package.json` dependency signals such as Express, React, Next.js, Vue, NestJS, Fastify, MUI, Tailwind, AWS SDKs
+- `package.json` scripts such as `test`, `lint`, `typecheck`, `build`
 - Python manifests such as `pyproject.toml`, `requirements.txt`, `Pipfile`, `setup.py`
+- `pyproject.toml` tool sections such as `[tool.pytest]`, `[tool.ruff]`, `[tool.mypy]`
 - mixed-runtime signals such as `pymilvus`, `boto3`, FastAPI, Django, Flask
 - lockfiles to infer npm / yarn / pnpm / bun
+- `Makefile` / `justfile` validation targets
+- `.github/workflows/*.yml` run commands
+- `.pre-commit-config.yaml` hooks
+- linter/formatter configs (`.eslintrc*`, `.prettierrc*`, `ruff.toml`, `.editorconfig`)
+- `CONTRIBUTING.md` development conventions
 - `Dockerfile`, `docker-compose.yml`, `.github/workflows`, `tsconfig.json`
 
 The guided flow proposes:
@@ -110,7 +117,12 @@ The guided flow proposes:
 - repository components
 - package manager rule
 - runtime rule
+- **suggested validation commands** (detected from package.json scripts, Makefile, CI workflows)
+- **suggested workspace sections** (inferred from TypeScript, linter configs, CONTRIBUTING.md)
 - whether to keep the review checklist
+- **suggested checklist enhancements** (derived from detected validation commands)
+
+Every suggestion carries a provenance label (`detected` or `inferred`) so the operator can see where each item came from. Suggestions are shown for review and must be accepted before they become part of the canonical spec.
 
 It works both in a real TTY and with piped stdin, so it can be tested or automated in CI.
 
@@ -126,6 +138,18 @@ Open `docs/agent-jump-start/canonical-spec.yaml` and fill in:
 - Validation commands
 - Review checklist
 - Skills (optional)
+
+If you used `init --guided`, many of these fields are already populated from repo evidence. If you started from a blank spec, you can use `infer` to discover validation commands, workspace rules, and checklist items from the repository:
+
+```bash
+# Preview what the tool can detect from the repo
+agent-jump-start infer --target .
+
+# Export a structured JSON inference report with provenance labels
+agent-jump-start infer --target . --output inferred-report.json --format json
+```
+
+`infer` currently exports a structured inference report, not a spec-valid overlay. The report is designed for operator review and manual transfer into the canonical spec, preserving `detected` / `inferred` provenance without silently auto-authoring repository governance.
 
 The spec uses a strict YAML subset that is also valid JSON and can be parsed with `JSON.parse`, keeping the generator zero-dependency.
 
@@ -145,9 +169,16 @@ If `sync` finds local skill packages under `.agents/skills/`, `.claude/skills/`,
 ```bash
 agent-jump-start doctor \
   --spec docs/agent-jump-start/canonical-spec.yaml
+
+# With --suggest: show inferred replacements alongside warnings
+agent-jump-start doctor \
+  --spec docs/agent-jump-start/canonical-spec.yaml \
+  --suggest --target .
 ```
 
 `doctor` inspects the spec for placeholder text, generic validation commands, missing components, and other signs that the setup is still scaffolded rather than production-ready. Exits with code `1` when warnings are found.
+
+When `--suggest` and `--target` are provided, doctor also runs repo inference and prints suggested replacements alongside each warning. No auto-write — the operator reviews and applies what they want.
 
 ### 4. Commit
 
@@ -428,7 +459,8 @@ agent-jump-start list-profiles
 agent-jump-start init [--guided] [--profile <path>] [--target <path>]
 agent-jump-start bootstrap --base <path> [--profile <path>] [--output <path>]
 agent-jump-start sync --spec <path> [--target <path>]
-agent-jump-start doctor --spec <path>
+agent-jump-start infer --target <path> [--output <path>] [--section <name>] [--format json|text]
+agent-jump-start doctor --spec <path> [--suggest --target <path>]
 agent-jump-start render --spec <path> [--target <path>] [--clean]
 agent-jump-start check --spec <path> [--target <path>]
 agent-jump-start validate --spec <path>
@@ -479,7 +511,7 @@ and reimplement the renderer elsewhere.
 npm test
 ```
 
-132 tests covering core workflows, sync command, doctor diagnostics, layered specs, writeback semantics, guided onboarding, project introspection, skill import/export, provenance lockfiles, `update-skills` refresh flows, progressive disclosure, high-level source adapters, semantic classification, mirror sync integrity, round-trip stability, provenance-safe intake replace, and symlink resilience.
+168 tests covering core workflows, sync command, doctor diagnostics, layered specs, writeback semantics, deep introspection, spec inference, assisted bootstrap, guided onboarding, project introspection, skill import/export, provenance lockfiles, `update-skills` refresh flows, progressive disclosure, high-level source adapters, semantic classification, mirror sync integrity, round-trip stability, provenance-safe intake replace, and symlink resilience.
 
 ## Contributing
 
