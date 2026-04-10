@@ -149,7 +149,23 @@ agent-jump-start infer --target .
 agent-jump-start infer --target . --output inferred-report.json --format json
 ```
 
-`infer` currently exports a structured inference report, not a spec-valid overlay. The report is designed for operator review and manual transfer into the canonical spec, preserving `detected` / `inferred` provenance without silently auto-authoring repository governance.
+`infer` exports a structured inference report with provenance labels (`detected` / `inferred`) for operator review. When you need a machine-ready spec fragment instead, use `infer-overlay`:
+
+```bash
+# Generate a layered overlay that extends a base spec
+agent-jump-start infer-overlay --target . --base canonical-spec.yaml --output overlay.yaml
+
+# Generate a partial overlay fragment for manual merge/review
+agent-jump-start infer-overlay --target . --output overlay-fragment.yaml
+
+# Restrict to a specific section
+agent-jump-start infer-overlay --target . --section validation
+```
+
+`infer-overlay` strips provenance metadata and reshapes inference output to match the canonical JSON Schema.
+
+- with `--base`, it generates a layered overlay that can be validated and used directly with `render` / `sync`
+- without `--base`, it generates a partial overlay fragment that is useful for manual merge or further editing, but may not validate on its own
 
 The spec uses a strict YAML subset that is also valid JSON and can be parsed with `JSON.parse`, keeping the generator zero-dependency.
 
@@ -460,17 +476,21 @@ agent-jump-start init [--guided] [--profile <path>] [--target <path>]
 agent-jump-start bootstrap --base <path> [--profile <path>] [--output <path>]
 agent-jump-start sync --spec <path> [--target <path>]
 agent-jump-start infer --target <path> [--output <path>] [--section <name>] [--format json|text]
+agent-jump-start infer-overlay --target <path> [--output <path>] [--base <path>] [--section <name>]
 agent-jump-start doctor --spec <path> [--suggest --target <path>]
 agent-jump-start render --spec <path> [--target <path>] [--clean]
 agent-jump-start check --spec <path> [--target <path>]
 agent-jump-start validate --spec <path>
 
 agent-jump-start validate-skill <path>
+agent-jump-start intake --spec <path> [--target <path>] [--import] [--replace]
 agent-jump-start import-skill --spec <path> --skill <path> [--replace]
 agent-jump-start add-skill <source> --spec <path> [--skill <name>] [--replace] [--provider <name>]
 agent-jump-start export-skill --spec <path> --slug <name> --output <path>
 agent-jump-start update-skills --spec <path> [--skill <slug>] [--dry-run]
 agent-jump-start export-schema [--output <path>]
+agent-jump-start demo-clean --target <path>
+agent-jump-start demo-tree --target <path>
 ```
 
 The most reliable execution paths are `agent-jump-start` after a global install and the vendored `node docs/agent-jump-start/scripts/agent-jump-start.mjs`. `npx @marcogoldin/agent-jump-start@latest ...` may also work, but some npm environments do not resolve the published bin consistently.
@@ -486,6 +506,7 @@ agent-jump-start export-schema --output canonical-spec.schema.json
 ## Current Limitations
 
 - Layered specs (`extends`) are functional and write-safe for current workflows, but monorepo governance and ownership policy are not fully defined yet.
+- `infer-overlay --base <spec>` produces a layered overlay that can be validated directly. Without `--base`, the command emits a partial overlay fragment intended for manual merge or further editing.
 - `intake --import --replace` is provenance-safe: skills tracked with upstream provenance (github, skills, skillfish) are never downgraded to local-directory. Only locally-tracked managed skills can be replaced via intake.
 - Broken symlinks in local skill directories are silently skipped during discovery and do not crash sync.
 - Continue, Aider, Windsurf, Cline, and Roo Code do not receive native skill packages; they receive mirrored workspace guidance plus inline skill summaries.
@@ -511,7 +532,7 @@ and reimplement the renderer elsewhere.
 npm test
 ```
 
-168 tests covering core workflows, sync command, doctor diagnostics, layered specs, writeback semantics, deep introspection, spec inference, assisted bootstrap, guided onboarding, project introspection, skill import/export, provenance lockfiles, `update-skills` refresh flows, progressive disclosure, high-level source adapters, semantic classification, mirror sync integrity, round-trip stability, provenance-safe intake replace, and symlink resilience.
+180 tests covering core workflows, sync command, doctor diagnostics, layered specs, writeback semantics, deep introspection, spec inference, overlay generation, assisted bootstrap, guided onboarding, project introspection, skill import/export, provenance lockfiles, `update-skills` refresh flows, progressive disclosure, high-level source adapters, semantic classification, mirror sync integrity, round-trip stability, provenance-safe intake replace, and symlink resilience.
 
 ## Contributing
 

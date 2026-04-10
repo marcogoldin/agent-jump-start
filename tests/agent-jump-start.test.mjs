@@ -5,8 +5,9 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { introspectProject, formatDetectedComponents, suggestPackageManagerRule, suggestRuntimeRule, deepIntrospect } from "../lib/introspection.mjs";
-import { inferValidation, inferSections, inferChecklist } from "../lib/inference.mjs";
+import { inferValidation, inferSections, inferChecklist, buildOverlayFromEvidence } from "../lib/inference.mjs";
 import { mergeByKey, mergeSpecLayers, resolveLayeredSpec, resolveLayeredSpecWithMeta } from "../lib/merging.mjs";
+import { validateSpec } from "../lib/validation.mjs";
 import { discoverUnmanagedSkills } from "../lib/intake.mjs";
 import { findSkillCandidates } from "../lib/skills.mjs";
 
@@ -4670,4 +4671,323 @@ test("init --guided with scripts proposes validation commands in interactive flo
   } finally {
     cleanupTempDir(tempDir);
   }
+});
+
+// ===========================================================================
+// buildOverlayFromEvidence unit tests (T5)
+// ===========================================================================
+
+test("buildOverlayFromEvidence produces validation strings without provenance", () => {
+  const evidence = {
+    base: {
+      packageManager: "npm", runtimes: ["Node.js"], components: [],
+      signals: [],
+    },
+    scripts: [
+      { command: "npm run test", source: "package.json scripts.test", raw: "jest" },
+      { command: "npm run lint", source: "package.json scripts.lint", raw: "eslint ." },
+    ],
+    pyprojectTools: { scripts: [], tools: [] },
+    ciSteps: [],
+    linterConfigs: [],
+    conventions: [],
+    preCommitHooks: [],
+    makeTargets: [],
+  };
+
+  const overlay = buildOverlayFromEvidence(evidence);
+
+  assert.ok(overlay.workspaceInstructions, "Should have workspaceInstructions");
+  assert.ok(Array.isArray(overlay.workspaceInstructions.validation), "Should have validation");
+  for (const v of overlay.workspaceInstructions.validation) {
+    assert.equal(typeof v, "string", "Validation entries must be plain strings");
+  }
+  assert.ok(overlay.workspaceInstructions.validation.some((v) => /npm run test/.test(v)));
+});
+
+test("buildOverlayFromEvidence strips provenance from sections rules", () => {
+  const evidence = {
+    base: {
+      packageManager: "npm", runtimes: ["Node.js"], components: [],
+      signals: [{ type: "config", file: "tsconfig.json", detail: "TypeScript project" }],
+    },
+    scripts: [],
+    pyprojectTools: { scripts: [], tools: [] },
+    ciSteps: [],
+    linterConfigs: [{ file: ".eslintrc.json", tool: "eslint" }],
+    conventions: [],
+    preCommitHooks: [],
+    makeTargets: [],
+  };
+
+  const overlay = buildOverlayFromEvidence(evidence);
+
+  assert.ok(overlay.workspaceInstructions?.sections, "Should have sections");
+  for (const section of overlay.workspaceInstructions.sections) {
+    assert.equal(typeof section.title, "string", "Section title must be string");
+    assert.ok(Array.isArray(section.rules), "Section rules must be array");
+    for (const rule of section.rules) {
+      assert.equal(typeof rule, "string", "Rule entries must be plain strings");
+    }
+  }
+});
+
+test("buildOverlayFromEvidence adds extends field when base is specified", () => {
+  const evidence = {
+    base: {
+      packageManager: "npm", runtimes: ["Node.js"], components: [],
+      signals: [],
+    },
+    scripts: [{ command: "npm test", source: "package.json scripts.test", raw: "jest" }],
+    pyprojectTools: { scripts: [], tools: [] },
+    ciSteps: [],
+    linterConfigs: [],
+    conventions: [],
+    preCommitHooks: [],
+    makeTargets: [],
+  };
+
+  const overlay = buildOverlayFromEvidence(evidence, { base: "base-spec.yaml" });
+
+  assert.equal(overlay.extends, "base-spec.yaml");
+  assert.equal(overlay.schemaVersion, undefined, "Overlay with extends should not have schemaVersion");
+  assert.equal(overlay.project, undefined, "Overlay with extends should not have project");
+});
+
+test("buildOverlayFromEvidence omits reviewChecklist when no items", () => {
+  const evidence = {
+    base: {
+      packageManager: "npm", runtimes: ["Node.js"], components: [],
+      signals: [],
+    },
+    scripts: [],
+    pyprojectTools: { scripts: [], tools: [] },
+    ciSteps: [],
+    linterConfigs: [],
+    conventions: [],
+    preCommitHooks: [],
+    makeTargets: [],
+  };
+
+  const overlay = buildOverlayFromEvidence(evidence);
+
+  assert.equal(overlay.reviewChecklist, undefined,
+    "reviewChecklist must be omitted when no items (schema requires minItems: 1)");
+});
+
+test("buildOverlayFromEvidence generates reviewChecklist with correct structure", () => {
+  const evidence = {
+    base: {
+      packageManager: "npm", runtimes: ["Node.js"], components: [],
+      signals: [{ type: "config", file: "tsconfig.json", detail: "TypeScript project" }],
+    },
+    scripts: [
+      { command: "npm run test", source: "package.json scripts.test", raw: "jest" },
+      { command: "npm run lint", source: "package.json scripts.lint", raw: "eslint ." },
+    ],
+    pyprojectTools: { scripts: [], tools: [] },
+    ciSteps: [],
+    linterConfigs: [],
+    conventions: [],
+    preCommitHooks: [],
+    makeTargets: [],
+  };
+
+  const overlay = buildOverlayFromEvidence(evidence);
+
+  if (overlay.reviewChecklist) {
+    const rc = overlay.reviewChecklist;
+    assert.equal(typeof rc.intro, "string", "intro must be string");
+    assert.equal(typeof rc.failureThreshold, "number", "failureThreshold must be number");
+    assert.ok(rc.failureThreshold >= 1, "failureThreshold must be >= 1");
+    assert.ok(Array.isArray(rc.items), "items must be array");
+    assert.ok(rc.items.length >= 1, "items must have at least 1 entry (schema minItems: 1)");
+    for (const item of rc.items) {
+      assert.equal(typeof item.title, "string", "Checklist item must use { title } shape");
+      assert.equal(item.value, undefined, "Checklist item must not have raw 'value' key");
+      assert.equal(item.provenance, undefined, "Checklist item must not have 'provenance'");
+    }
+  }
+});
+
+test("buildOverlayFromEvidence respects section filter", () => {
+  const evidence = {
+    base: {
+      packageManager: "npm", runtimes: ["Node.js"], components: [],
+      signals: [{ type: "config", file: "tsconfig.json", detail: "TypeScript project" }],
+    },
+    scripts: [
+      { command: "npm run test", source: "package.json scripts.test", raw: "jest" },
+    ],
+    pyprojectTools: { scripts: [], tools: [] },
+    ciSteps: [],
+    linterConfigs: [{ file: ".eslintrc.json", tool: "eslint" }],
+    conventions: [],
+    preCommitHooks: [],
+    makeTargets: [],
+  };
+
+  const validationOnly = buildOverlayFromEvidence(evidence, { section: "validation" });
+  assert.ok(validationOnly.workspaceInstructions?.validation, "Should have validation");
+  assert.equal(validationOnly.workspaceInstructions?.sections, undefined, "Should not have sections");
+  assert.equal(validationOnly.reviewChecklist, undefined, "Should not have reviewChecklist");
+
+  const rulesOnly = buildOverlayFromEvidence(evidence, { section: "rules" });
+  assert.equal(rulesOnly.workspaceInstructions?.validation, undefined, "Should not have validation");
+  assert.ok(rulesOnly.workspaceInstructions?.sections, "Should have sections");
+});
+
+// ===========================================================================
+// Integration: infer -> overlay -> validate (T6)
+// ===========================================================================
+
+test("buildOverlayFromEvidence output passes validateSpec when complete", () => {
+  // Un overlay senza `extends` ha bisogno di schemaVersion e project per
+  // passare la validazione.  Qui verifichiamo che un overlay completo
+  // (arricchito con i campi minimi) superi la validazione schema.
+  const evidence = {
+    base: {
+      packageManager: "npm", runtimes: ["Node.js"], components: ["api: Express"],
+      signals: [{ type: "config", file: "tsconfig.json", detail: "TypeScript project" }],
+    },
+    scripts: [
+      { command: "npm run test", source: "package.json scripts.test", raw: "jest" },
+      { command: "npm run lint", source: "package.json scripts.lint", raw: "eslint ." },
+    ],
+    pyprojectTools: { scripts: [], tools: [] },
+    ciSteps: [],
+    linterConfigs: [{ file: ".eslintrc.json", tool: "eslint" }],
+    conventions: [],
+    preCommitHooks: [],
+    makeTargets: [],
+  };
+
+  const overlay = buildOverlayFromEvidence(evidence);
+
+  // Arricchiamo con i campi obbligatori per uno spec completo
+  const fullSpec = {
+    schemaVersion: 1,
+    project: {
+      name: "integration-test",
+      summary: "Integration test overlay.",
+      components: ["api: Express"],
+    },
+    ...overlay,
+    skills: [],
+  };
+
+  // Non deve lanciare eccezioni
+  assert.doesNotThrow(
+    () => validateSpec(fullSpec, "integration-test-overlay"),
+    "Complete overlay enriched with required fields should pass schema validation",
+  );
+});
+
+// ===========================================================================
+// CLI infer-overlay e2e tests (T7)
+// ===========================================================================
+
+test("infer-overlay command outputs JSON to stdout", () => {
+  const tempDir = makeTempDir();
+  try {
+    writeFileSync(join(tempDir, "package.json"), JSON.stringify({
+      name: "overlay-stdout-test",
+      scripts: { test: "jest", lint: "eslint ." },
+    }), "utf8");
+
+    const result = spawnSync(process.execPath, [
+      scriptPath, "infer-overlay", "--target", tempDir,
+    ], { encoding: "utf8" });
+
+    assert.equal(result.status, 0,
+      `Expected success.\nSTDOUT:\n${result.stdout}\nSTDERR:\n${result.stderr}`);
+    const parsed = JSON.parse(result.stdout);
+    assert.ok(parsed.workspaceInstructions, "Should have workspaceInstructions");
+    assert.ok(Array.isArray(parsed.workspaceInstructions.validation),
+      "Should have validation array");
+    // Nessuna traccia di provenance nell'output
+    for (const v of parsed.workspaceInstructions.validation) {
+      assert.equal(typeof v, "string", "Validation entries in overlay must be plain strings");
+    }
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("infer-overlay command writes to --output file", () => {
+  const tempDir = makeTempDir();
+  try {
+    writeFileSync(join(tempDir, "package.json"), JSON.stringify({
+      name: "overlay-file-test",
+      scripts: { test: "vitest", build: "tsc" },
+    }), "utf8");
+    writeFileSync(join(tempDir, "tsconfig.json"), "{}", "utf8");
+
+    const outputPath = join(tempDir, "overlay.json");
+    const result = spawnSync(process.execPath, [
+      scriptPath, "infer-overlay", "--target", tempDir, "--output", outputPath,
+    ], { encoding: "utf8" });
+
+    assert.equal(result.status, 0,
+      `Expected success.\nSTDOUT:\n${result.stdout}\nSTDERR:\n${result.stderr}`);
+    assert.ok(existsSync(outputPath), "Output file should be written");
+    const parsed = JSON.parse(readFileSync(outputPath, "utf8"));
+    assert.ok(parsed.workspaceInstructions, "Should have workspaceInstructions");
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("infer-overlay command includes extends when --base is provided", () => {
+  const tempDir = makeTempDir();
+  try {
+    writeFileSync(join(tempDir, "package.json"), JSON.stringify({
+      name: "overlay-base-test",
+      scripts: { test: "jest" },
+    }), "utf8");
+
+    const result = spawnSync(process.execPath, [
+      scriptPath, "infer-overlay", "--target", tempDir, "--base", "specs/base-spec.yaml",
+    ], { encoding: "utf8" });
+
+    assert.equal(result.status, 0,
+      `Expected success.\nSTDOUT:\n${result.stdout}\nSTDERR:\n${result.stderr}`);
+    const parsed = JSON.parse(result.stdout);
+    assert.equal(parsed.extends, "specs/base-spec.yaml");
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("infer-overlay command respects --section filter", () => {
+  const tempDir = makeTempDir();
+  try {
+    writeFileSync(join(tempDir, "package.json"), JSON.stringify({
+      name: "overlay-section-test",
+      scripts: { test: "jest", lint: "eslint ." },
+    }), "utf8");
+    writeFileSync(join(tempDir, ".eslintrc.json"), "{}", "utf8");
+
+    const result = spawnSync(process.execPath, [
+      scriptPath, "infer-overlay", "--target", tempDir, "--section", "validation",
+    ], { encoding: "utf8" });
+
+    assert.equal(result.status, 0,
+      `Expected success.\nSTDOUT:\n${result.stdout}\nSTDERR:\n${result.stderr}`);
+    const parsed = JSON.parse(result.stdout);
+    assert.ok(parsed.workspaceInstructions?.validation, "Should have validation");
+    assert.equal(parsed.workspaceInstructions?.sections, undefined,
+      "Should not have sections when filtered to validation");
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("infer-overlay command fails without --target", () => {
+  const result = spawnSync(process.execPath, [
+    scriptPath, "infer-overlay",
+  ], { encoding: "utf8" });
+
+  assert.notEqual(result.status, 0, "Should fail without --target");
+  assert.match(result.stderr, /target/i);
 });
