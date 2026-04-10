@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync, existsSync, chmodSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync, existsSync, chmodSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { introspectProject, formatDetectedComponents, suggestPackageManagerRule, suggestRuntimeRule } from "../lib/introspection.mjs";
 import { mergeByKey, mergeSpecLayers, resolveLayeredSpec, resolveLayeredSpecWithMeta } from "../lib/merging.mjs";
+import { discoverUnmanagedSkills } from "../lib/intake.mjs";
+import { findSkillCandidates } from "../lib/skills.mjs";
 
 const scriptPath = resolve("scripts/agent-jump-start.mjs");
 
@@ -163,6 +165,7 @@ test("init copies lib/ modules for modular imports", () => {
     assert.ok(existsSync(join(ajsDir, "lib/skills.mjs")), "lib/skills.mjs should exist");
     assert.ok(existsSync(join(ajsDir, "lib/schema.mjs")), "lib/schema.mjs should exist");
     assert.ok(existsSync(join(ajsDir, "lib/doctor.mjs")), "lib/doctor.mjs should exist");
+    assert.ok(existsSync(join(ajsDir, "lib/intake.mjs")), "lib/intake.mjs should exist");
     assert.ok(existsSync(join(ajsDir, "lib/lockfile.mjs")), "lib/lockfile.mjs should exist");
     assert.ok(existsSync(join(ajsDir, "lib/source-info.mjs")), "lib/source-info.mjs should exist");
   } finally {
@@ -818,6 +821,333 @@ exit 1
     assert.equal(lockfile.skills[0].source, "https://github.com/example/repo/tree/main/skills/github-skill");
     assert.equal(lockfile.skills[0].treePath, "skills/github-skill");
     assert.match(lockfile.skills[0].repoUrl, /^https:\/\/github\.com\/example\/repo\.git$/);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+// ===========================================================================
+// External skill intake tests
+// ===========================================================================
+
+test("discoverUnmanagedSkills returns an empty list when no local skills are present", () => {
+  const tempDir = makeTempDir();
+  try {
+    const discoveries = discoverUnmanagedSkills(tempDir, makeMinimalSpec());
+    assert.deepEqual(discoveries, []);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("intake reports managed, unmanaged, and invalid local skills", () => {
+  const tempDir = makeTempDir();
+  try {
+    const specPath = writeSpec(tempDir, makeMinimalSpec({
+      skills: [makeSkillFixture({ slug: "managed-skill", title: "Managed Skill" })],
+    }));
+
+    mkdirSync(join(tempDir, ".agents/skills"), { recursive: true });
+    makeSkillMdDir(join(tempDir, ".agents/skills"), "managed-skill", "1.0.0", "Already managed.");
+    makeSkillMdDir(join(tempDir, ".agents/skills"), "unmanaged-a", "1.0.0", "Need import.");
+    makeSkillMdDir(join(tempDir, ".agents/skills"), "unmanaged-b", "1.0.0", "Need import too.");
+
+    const invalidDir = join(tempDir, ".agents/skills", "invalid-skill");
+    mkdirSync(invalidDir, { recursive: true });
+    writeFileSync(join(invalidDir, "SKILL.md"), `---
+name: invalid-skill
+metadata:
+  version: "1.0.0"
+---
+# invalid-skill
+`, "utf8");
+
+    const result = runCli(["intake", "--spec", specPath, "--target", tempDir]);
+    expectFailure(result);
+    assert.match(result.stdout, /managed-skill\s+\(managed\)/);
+    assert.match(result.stdout, /unmanaged-a\s+\(unmanaged\)/);
+    assert.match(result.stdout, /unmanaged-b\s+\(unmanaged\)/);
+    assert.match(result.stdout, /invalid-skill\s+\(invalid\)/);
+    assert.match(result.stdout, /frontmatter\.description is required/);
+    assert.match(result.stdout, /Summary: 2 unmanaged, 1 managed, 1 invalid/);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("intake --import imports valid local skills, skips invalid ones, and updates the lockfile", () => {
+  const tempDir = makeTempDir();
+  try {
+    const specPath = writeSpec(tempDir, makeMinimalSpec());
+
+    mkdirSync(join(tempDir, ".agents/skills"), { recursive: true });
+    makeSkillMdDir(join(tempDir, ".agents/skills"), "python-pro", "2.0.0", "Use typed Python.");
+
+    const invalidDir = join(tempDir, ".agents/skills", "broken-skill");
+    mkdirSync(invalidDir, { recursive: true });
+    writeFileSync(join(invalidDir, "SKILL.md"), "# Missing frontmatter\n", "utf8");
+
+    const result = runCli(["intake", "--spec", specPath, "--target", tempDir, "--import"]);
+    expectSuccess(result);
+    assert.match(result.stdout, /Import summary: 1 added, 0 replaced, 1 invalid, 0 already managed and skipped/);
+    assert.match(result.stdout, /broken-skill/);
+
+    const spec = JSON.parse(readFileSync(specPath, "utf8"));
+    assert.equal(spec.skills.length, 1);
+    assert.equal(spec.skills[0].slug, "python-pro");
+
+    const lockfile = readLockfile(tempDir);
+    assert.equal(lockfile.skills.length, 1);
+    assert.equal(lockfile.skills[0].slug, "python-pro");
+    assert.equal(lockfile.skills[0].sourceType, "local-directory");
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("intake --import --replace overwrites a managed skill from local disk", () => {
+  const tempDir = makeTempDir();
+  try {
+    const specPath = writeSpec(tempDir, makeMinimalSpec({
+      skills: [makeSkillFixture({
+        slug: "typescript-pro",
+        title: "Original TypeScript Pro",
+        version: "1.0.0",
+      })],
+    }));
+
+    mkdirSync(join(tempDir, ".agents/skills"), { recursive: true });
+    const replacementDir = makeSkillMdDir(join(tempDir, ".agents/skills"), "typescript-pro", "2.0.0", "Prefer strict typing.");
+
+    const result = runCli(["intake", "--spec", specPath, "--target", tempDir, "--import", "--replace"]);
+    expectSuccess(result);
+    assert.match(result.stdout, /Import summary: 0 added, 1 replaced, 0 invalid, 0 already managed and skipped/);
+
+    const spec = JSON.parse(readFileSync(specPath, "utf8"));
+    assert.equal(spec.skills.length, 1);
+    assert.equal(spec.skills[0].slug, "typescript-pro");
+    assert.equal(spec.skills[0].version, "2.0.0");
+
+    const lockfile = readLockfile(tempDir);
+    assert.equal(lockfile.skills.length, 1);
+    assert.equal(lockfile.skills[0].slug, "typescript-pro");
+    assert.equal(lockfile.skills[0].source, replacementDir);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+// ===========================================================================
+// Provenance-safe replace regression tests
+// ===========================================================================
+
+test("intake --import --replace does not degrade a github provenance to local-directory", () => {
+  const tempDir = makeTempDir();
+  try {
+    const specPath = writeSpec(tempDir, makeMinimalSpec({
+      skills: [makeSkillFixture({
+        slug: "code-reviewer",
+        title: "Code Reviewer",
+        version: "1.0.0",
+      })],
+    }));
+
+    // Pre-seed a lockfile with github provenance for this skill.
+    writeFileSync(join(tempDir, "agent-jump-start.lock.json"), `${JSON.stringify({
+      schemaVersion: 1,
+      generatedBy: "Agent Jump Start vtest",
+      skills: [{
+        slug: "code-reviewer",
+        version: "1.0.0",
+        sourceType: "github",
+        provider: "github",
+        source: "https://github.com/example/skills/tree/main/code-reviewer",
+        repoUrl: "https://github.com/example/skills.git",
+        ref: "main",
+        treePath: "code-reviewer",
+        checksum: "sha256:abc123",
+        importedAt: "2026-04-01T00:00:00.000Z",
+      }],
+    }, null, 2)}\n`, "utf8");
+
+    // Place a local mirror at .agents/skills/code-reviewer (simulating
+    // a generated mirror that AJS rendered during sync).
+    mkdirSync(join(tempDir, ".agents/skills"), { recursive: true });
+    makeSkillMdDir(join(tempDir, ".agents/skills"), "code-reviewer", "1.1.0", "Updated local mirror rule.");
+
+    const result = runCli(["intake", "--spec", specPath, "--target", tempDir, "--import", "--replace"]);
+    expectSuccess(result);
+
+    // The skill must NOT have been imported — it should be skipped.
+    assert.match(result.stdout, /upstream-tracked/);
+
+    // Lockfile provenance must remain github, not local-directory.
+    const lockfile = readLockfile(tempDir);
+    const entry = lockfile.skills.find((s) => s.slug === "code-reviewer");
+    assert.equal(entry.sourceType, "github");
+    assert.equal(entry.provider, "github");
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("intake --import --replace does not degrade a skills/skillfish provenance", () => {
+  const tempDir = makeTempDir();
+  try {
+    const specPath = writeSpec(tempDir, makeMinimalSpec({
+      skills: [makeSkillFixture({
+        slug: "express-api",
+        title: "Express API",
+        version: "1.0.0",
+      })],
+    }));
+
+    // Pre-seed a lockfile with skills provenance.
+    writeFileSync(join(tempDir, "agent-jump-start.lock.json"), `${JSON.stringify({
+      schemaVersion: 1,
+      generatedBy: "Agent Jump Start vtest",
+      skills: [{
+        slug: "express-api",
+        version: "1.0.0",
+        sourceType: "skills",
+        provider: "skills",
+        source: "express-api",
+        locator: "express-api",
+        skill: "express-api",
+        checksum: "sha256:def456",
+        importedAt: "2026-04-01T00:00:00.000Z",
+      }],
+    }, null, 2)}\n`, "utf8");
+
+    mkdirSync(join(tempDir, ".agents/skills"), { recursive: true });
+    makeSkillMdDir(join(tempDir, ".agents/skills"), "express-api", "1.1.0", "Updated from local mirror.");
+
+    const result = runCli(["intake", "--spec", specPath, "--target", tempDir, "--import", "--replace"]);
+    expectSuccess(result);
+    assert.match(result.stdout, /upstream-tracked/);
+
+    const lockfile = readLockfile(tempDir);
+    const entry = lockfile.skills.find((s) => s.slug === "express-api");
+    assert.equal(entry.sourceType, "skills");
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("intake --import --replace still works for locally-tracked managed skills", () => {
+  const tempDir = makeTempDir();
+  try {
+    const specPath = writeSpec(tempDir, makeMinimalSpec({
+      skills: [makeSkillFixture({
+        slug: "custom-skill",
+        title: "Custom Skill",
+        version: "1.0.0",
+      })],
+    }));
+
+    // Pre-seed a lockfile with local-directory provenance.
+    mkdirSync(join(tempDir, ".agents/skills"), { recursive: true });
+    const skillDir = makeSkillMdDir(join(tempDir, ".agents/skills"), "custom-skill", "2.0.0", "Updated local.");
+
+    writeFileSync(join(tempDir, "agent-jump-start.lock.json"), `${JSON.stringify({
+      schemaVersion: 1,
+      generatedBy: "Agent Jump Start vtest",
+      skills: [{
+        slug: "custom-skill",
+        version: "1.0.0",
+        sourceType: "local-directory",
+        provider: "local",
+        source: skillDir,
+        checksum: "sha256:old",
+        importedAt: "2026-04-01T00:00:00.000Z",
+      }],
+    }, null, 2)}\n`, "utf8");
+
+    const result = runCli(["intake", "--spec", specPath, "--target", tempDir, "--import", "--replace"]);
+    expectSuccess(result);
+    assert.match(result.stdout, /0 added, 1 replaced/);
+
+    const spec = JSON.parse(readFileSync(specPath, "utf8"));
+    assert.equal(spec.skills[0].version, "2.0.0");
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+// ===========================================================================
+// Symlink resilience regression tests
+// ===========================================================================
+
+test("findSkillCandidates does not crash on broken symlinks", () => {
+  const tempDir = makeTempDir();
+  try {
+    const skillsDir = join(tempDir, ".agents/skills");
+    mkdirSync(skillsDir, { recursive: true });
+
+    // Create a valid skill directory.
+    makeSkillMdDir(skillsDir, "valid-skill", "1.0.0", "Valid skill.");
+
+    // Create a broken symlink that points to a non-existent target.
+    symlinkSync(join(tempDir, "missing-target"), join(skillsDir, "broken-skill"));
+
+    // findSkillCandidates must not throw.
+    const candidates = findSkillCandidates(skillsDir);
+    assert.ok(Array.isArray(candidates));
+    assert.ok(candidates.some((c) => c.includes("valid-skill")));
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("sync does not fail when a broken symlink exists under .claude/skills", () => {
+  const tempDir = makeTempDir();
+  try {
+    const specPath = writeSpec(tempDir, makeMinimalSpec());
+    const skillsDir = join(tempDir, ".claude/skills");
+    mkdirSync(skillsDir, { recursive: true });
+
+    // Create a broken symlink.
+    symlinkSync(join(tempDir, "does-not-exist"), join(skillsDir, "broken-link"));
+
+    const result = runCli(["sync", "--spec", specPath, "--target", tempDir]);
+    expectSuccess(result);
+    assert.match(result.stdout, /Sync check passed/);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("sync warns when unmanaged local skills are present", () => {
+  const tempDir = makeTempDir();
+  try {
+    const specPath = writeSpec(tempDir, makeMinimalSpec());
+    mkdirSync(join(tempDir, ".agents/skills"), { recursive: true });
+    makeSkillMdDir(join(tempDir, ".agents/skills"), "nodejs-expert", "1.0.0", "Use clear service boundaries.");
+
+    const result = runCli(["sync", "--spec", specPath, "--target", tempDir]);
+    expectSuccess(result);
+    assert.match(result.stdout, /Sync check passed/);
+    assert.match(result.stdout, /Warning: found 1 unmanaged skill package/);
+    assert.match(result.stdout, /nodejs-expert/);
+    assert.match(result.stdout, /agent-jump-start intake --spec/);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("external skill intake end-to-end imports local skills and sync propagates them across targets", () => {
+  const tempDir = makeTempDir();
+  try {
+    const specPath = writeSpec(tempDir, makeMinimalSpec());
+    mkdirSync(join(tempDir, ".agents/skills"), { recursive: true });
+    makeSkillMdDir(join(tempDir, ".agents/skills"), "next-best-practices", "1.0.0", "Keep route boundaries explicit.");
+
+    expectSuccess(runCli(["intake", "--spec", specPath, "--target", tempDir, "--import"]));
+    expectSuccess(runCli(["sync", "--spec", specPath, "--target", tempDir]));
+
+    assert.ok(existsSync(join(tempDir, ".github/skills/next-best-practices/SKILL.md")));
+    assert.ok(existsSync(join(tempDir, ".claude/skills/next-best-practices/SKILL.md")));
+    assert.ok(existsSync(join(tempDir, ".cursor/rules/next-best-practices.mdc")));
   } finally {
     cleanupTempDir(tempDir);
   }

@@ -15,10 +15,11 @@ import { readExternalSkill, readSkillMdFile, readSkillDirectory, exportSkillPack
 import { CANONICAL_SPEC_SCHEMA } from "../lib/schema.mjs";
 import { runGuidedSetup } from "../lib/interactive.mjs";
 import { diagnoseSpec } from "../lib/doctor.mjs";
-import { defaultLockfilePath, makeProvenanceRecord, writeLockfileEntries } from "../lib/lockfile.mjs";
+import { defaultLockfilePath, makeProvenanceRecord, readLockfile, writeLockfileEntries } from "../lib/lockfile.mjs";
 import { makeLocalSourceInfo } from "../lib/source-info.mjs";
 import { refreshSkills } from "../lib/skills-updater.mjs";
 import { resolveLayeredSpec, resolveLayeredSpecWithMeta } from "../lib/merging.mjs";
+import { discoverUnmanagedSkills, KNOWN_SKILL_DIRS } from "../lib/intake.mjs";
 
 // ---------------------------------------------------------------------------
 // Usage
@@ -36,6 +37,7 @@ Commands:
   check          --spec <path> [--target <path>]
   validate       --spec <path>
   validate-skill <path>   (SKILL.md file or skill directory)
+  intake         --spec <path> [--target <path>] [--import] [--replace]
   import-skill   --spec <path> --skill <path> [--replace]
   add-skill      <source> --spec <path> [--skill <name>] [--replace] [--provider <name>]
   export-skill   --spec <path> --slug <slug> --output <path>
@@ -74,6 +76,12 @@ Examples:
 
   node scripts/agent-jump-start.mjs validate-skill \\
     path/to/skills/python-pro
+
+  node scripts/agent-jump-start.mjs intake \\
+    --spec canonical-spec.yaml
+
+  node scripts/agent-jump-start.mjs intake \\
+    --spec canonical-spec.yaml --import
 
   node scripts/agent-jump-start.mjs import-skill \\
     --spec canonical-spec.yaml \\
@@ -119,6 +127,84 @@ Supported Agents:
 `);
 }
 
+function displayPath(filePath, relativeTo = process.cwd()) {
+  const relativePath = relative(relativeTo, filePath);
+  if (relativePath && !relativePath.startsWith("..") && !relativePath.startsWith("/")) {
+    return relativePath.replaceAll("\\", "/");
+  }
+  return filePath;
+}
+
+function summarizeDiscoveries(discoveries) {
+  return {
+    unmanaged: discoveries.filter((entry) => entry.status === "unmanaged"),
+    managed: discoveries.filter((entry) => entry.status === "managed"),
+    invalid: discoveries.filter((entry) => entry.status === "invalid"),
+  };
+}
+
+function printIntakeReport(discoveries, targetRoot) {
+  if (discoveries.length === 0) {
+    console.log(`No local skill packages found under ${KNOWN_SKILL_DIRS.join(", ")}.`);
+    return;
+  }
+
+  console.log("Discovered local skill packages:");
+  for (const entry of discoveries) {
+    console.log(`  ${entry.slug}  (${entry.status})  ${displayPath(entry.path, targetRoot)}`);
+    if (entry.errors) {
+      for (const error of entry.errors) {
+        console.log(`    - ${error}`);
+      }
+    }
+  }
+
+  const { unmanaged, managed, invalid } = summarizeDiscoveries(discoveries);
+  console.log(
+    `\nSummary: ${unmanaged.length} unmanaged, ${managed.length} managed, ${invalid.length} invalid`,
+  );
+}
+
+function printSyncIntakeAdvisory(discoveries, targetRoot, specArg, targetArg) {
+  const { unmanaged, invalid } = summarizeDiscoveries(discoveries);
+  if (unmanaged.length === 0 && invalid.length === 0) {
+    return;
+  }
+
+  const intakeCommand = [
+    "agent-jump-start",
+    "intake",
+    "--spec",
+    specArg,
+    ...(targetArg ? ["--target", targetArg] : []),
+  ].join(" ");
+
+  if (unmanaged.length > 0) {
+    const roots = [...new Set(unmanaged.map((entry) => displayPath(entry.path, targetRoot).split("/")[0]))];
+    console.log("");
+    console.log(`Warning: found ${unmanaged.length} unmanaged skill package(s) in ${roots.join(", ")}.`);
+    console.log(`  ${unmanaged.map((entry) => entry.slug).join(", ")}`);
+    console.log(`  Run '${intakeCommand}' to review and import them.`);
+  }
+
+  if (invalid.length > 0) {
+    console.log("");
+    console.log(`Warning: found ${invalid.length} invalid local skill package(s).`);
+    for (const entry of invalid) {
+      console.log(`  ${entry.slug}: ${entry.errors.join("; ")}`);
+    }
+    console.log(`  Run '${intakeCommand}' to review them.`);
+  }
+}
+
+function makeLocalSourceInfoForPath(sourcePathInput) {
+  const relativePath = relative(process.cwd(), resolve(sourcePathInput));
+  const sourceLabel = relativePath && !relativePath.startsWith("..") && !relativePath.startsWith("/")
+    ? relativePath.replaceAll("\\", "/")
+    : sourcePathInput;
+  return makeLocalSourceInfo(sourceLabel);
+}
+
 // ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
@@ -138,7 +224,8 @@ async function main() {
 
   const { command, options } = parseArgs(args);
 
-  function importSkillsIntoSpec(specPathInput, sourcePathInput, replaceExisting = false, sourceInfo = null) {
+  function importSkillsIntoSpec(specPathInput, sourcePathInput, replaceExisting = false, sourceInfo = null, importOptions = {}) {
+    const quiet = Boolean(importOptions.quiet);
     const specPath = resolve(specPathInput);
     if (!existsSync(specPath)) {
       throw new Error(`Canonical spec not found: ${specPath}. Run bootstrap first.`);
@@ -179,12 +266,16 @@ async function main() {
             rawLeaf.skills.push(skill);
           }
           replaced += 1;
-          console.log(`  Replaced: ${skill.slug} (v${skill.version})`);
+          if (!quiet) {
+            console.log(`  Replaced: ${skill.slug} (v${skill.version})`);
+          }
           if (sourceInfo) {
             lockEntries.push(makeProvenanceRecord(skill, sourcePathInput, sourceInfo, specPathInput));
           }
         } else {
-          console.log(`  Skipped:  ${skill.slug} (already exists, use --replace to overwrite)`);
+          if (!quiet) {
+            console.log(`  Skipped:  ${skill.slug} (already exists, use --replace to overwrite)`);
+          }
           continue;
         }
       } else {
@@ -193,7 +284,9 @@ async function main() {
         }
         rawLeaf.skills.push(skill);
         added += 1;
-        console.log(`  Added:    ${skill.slug} (v${skill.version})`);
+        if (!quiet) {
+          console.log(`  Added:    ${skill.slug} (v${skill.version})`);
+        }
         if (sourceInfo) {
           lockEntries.push(makeProvenanceRecord(skill, sourcePathInput, sourceInfo, specPathInput));
         }
@@ -206,11 +299,20 @@ async function main() {
     if (lockEntries.length > 0) {
       const lockfilePath = defaultLockfilePath(specPathInput);
       writeLockfileEntries(lockfilePath, lockEntries);
-      console.log(`Lockfile updated: ${relative(process.cwd(), lockfilePath) || lockfilePath}`);
+      if (!quiet) {
+        console.log(`Lockfile updated: ${relative(process.cwd(), lockfilePath) || lockfilePath}`);
+      }
     }
-    console.log(`\nImport complete: ${added} added, ${replaced} replaced in ${specPathInput}`);
-    console.log(`Total skills in leaf spec: ${rawLeaf.skills.length}`);
-    console.log(`\nRun 'sync' to regenerate instruction files for all ${AGENT_COUNT} agents.`);
+    if (!quiet) {
+      console.log(`\nImport complete: ${added} added, ${replaced} replaced in ${specPathInput}`);
+      console.log(`Total skills in leaf spec: ${rawLeaf.skills.length}`);
+      console.log(`\nRun 'sync' to regenerate instruction files for all ${AGENT_COUNT} agents.`);
+    }
+    return {
+      added,
+      replaced,
+      totalSkillsInLeaf: rawLeaf.skills.length,
+    };
   }
 
   // -------------------------------------------------------------------
@@ -238,6 +340,7 @@ async function main() {
       "lib/introspection.mjs",
       "lib/interactive.mjs",
       "lib/doctor.mjs",
+      "lib/intake.mjs",
       "lib/lockfile.mjs",
       "lib/source-info.mjs",
       "lib/skills-updater.mjs",
@@ -372,6 +475,8 @@ async function main() {
       process.exit(1);
     }
     console.log(`\nSync check passed for ${passes.length} file(s)`);
+    const discoveries = discoverUnmanagedSkills(targetRoot, spec);
+    printSyncIntakeAdvisory(discoveries, targetRoot, options.spec, options.target ?? null);
     return;
   }
 
@@ -545,6 +650,108 @@ async function main() {
     }
 
     throw new Error(`${skillPath}: not a valid SKILL.md file or skill directory.`);
+  }
+
+  // -------------------------------------------------------------------
+  // intake
+  // -------------------------------------------------------------------
+  if (command === "intake") {
+    assertRequired(options, "spec", command);
+    const targetRoot = resolve(options.target ?? ".");
+    const spec = resolveLayeredSpec(options.spec);
+    validateSpec(spec, options.spec);
+
+    const discoveries = discoverUnmanagedSkills(targetRoot, spec);
+    printIntakeReport(discoveries, targetRoot);
+
+    if (!options.import) {
+      const { unmanaged, invalid } = summarizeDiscoveries(discoveries);
+      if (unmanaged.length > 0 || invalid.length > 0) {
+        process.exitCode = 1;
+      }
+      return;
+    }
+
+    // Build the set of upstream-tracked slugs so that --replace does
+    // not overwrite their provenance with local-directory.  A skill
+    // whose lockfile entry has a non-local sourceType (github, skills,
+    // skillfish) must not be re-imported from a local mirror.
+    const upstreamTrackedSlugs = new Set();
+    if (options.replace) {
+      const lockfilePath = defaultLockfilePath(options.spec);
+      try {
+        const lockfile = readLockfile(lockfilePath);
+        for (const entry of lockfile.skills ?? []) {
+          if (entry.sourceType === "github" || entry.sourceType === "skills" || entry.sourceType === "skillfish") {
+            upstreamTrackedSlugs.add(entry.slug);
+          }
+        }
+      } catch {
+        // No lockfile or invalid — nothing to protect.
+      }
+    }
+
+    const eligible = discoveries.filter((entry) => {
+      if (entry.status === "unmanaged") return true;
+      if (entry.status === "managed" && Boolean(options.replace)) {
+        if (upstreamTrackedSlugs.has(entry.slug)) return false;
+        return true;
+      }
+      return false;
+    });
+
+    const skippedUpstream = discoveries.filter(
+      (entry) => entry.status === "managed" && Boolean(options.replace) && upstreamTrackedSlugs.has(entry.slug),
+    );
+
+    if (eligible.length === 0) {
+      if (skippedUpstream.length > 0) {
+        console.log(`\nSkipped ${skippedUpstream.length} upstream-tracked skill(s) (provenance preserved):`);
+        for (const entry of skippedUpstream) {
+          console.log(`  ${entry.slug}`);
+        }
+      }
+      console.log("\nNo skill packages eligible for import.");
+      return;
+    }
+
+    let added = 0;
+    let replaced = 0;
+    for (const entry of eligible) {
+      const result = importSkillsIntoSpec(
+        options.spec,
+        entry.path,
+        Boolean(options.replace),
+        makeLocalSourceInfoForPath(entry.path),
+        { quiet: true },
+      );
+      added += result.added;
+      replaced += result.replaced;
+    }
+
+    const { invalid } = summarizeDiscoveries(discoveries);
+    console.log("");
+    if (skippedUpstream.length > 0) {
+      console.log(`Skipped ${skippedUpstream.length} upstream-tracked skill(s) (provenance preserved):`);
+      for (const entry of skippedUpstream) {
+        console.log(`  ${entry.slug}`);
+      }
+    }
+    console.log(
+      `Import summary: ${added} added, ${replaced} replaced, ${invalid.length} invalid, ` +
+      `${discoveries.length - eligible.length - invalid.length} already managed and skipped`,
+    );
+    if (invalid.length > 0) {
+      console.log("Invalid skill packages were not imported:");
+      for (const entry of invalid) {
+        console.log(`  ${entry.slug}`);
+        for (const error of entry.errors) {
+          console.log(`    - ${error}`);
+        }
+      }
+    }
+    console.log(`\nRun 'sync' to regenerate instruction files for all ${AGENT_COUNT} agents.`);
+    return;
   }
 
   // -------------------------------------------------------------------

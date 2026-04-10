@@ -138,6 +138,8 @@ agent-jump-start sync \
 
 `sync` is the recommended maintenance command. It renders all outputs, removes stale files, and verifies synchronization in one step. It replaces the manual `render --clean` + `check` sequence.
 
+If `sync` finds local skill packages under `.agents/skills/`, `.claude/skills/`, or `.github/skills/` that are not yet managed by the canonical spec, it prints an advisory and points you to `intake`.
+
 ### 3. Diagnose weak or incomplete content
 
 ```bash
@@ -190,6 +192,39 @@ Supported import sources:
 
 Each successful `import-skill` run also updates `agent-jump-start.lock.json` next to the spec. The lockfile records the imported skill slug, version, checksum, source, and resolved path so future refresh workflows can be audited and reproduced safely.
 
+### Intake locally installed skills
+
+Use `intake` when a third-party tool has already written skills into local agent folders and you want Agent Jump Start to adopt them into canonical project memory.
+
+```bash
+# Review local skill packages and see which ones are unmanaged
+agent-jump-start intake \
+  --spec docs/agent-jump-start/canonical-spec.yaml
+
+# Import all valid unmanaged skills into the canonical spec
+agent-jump-start intake \
+  --spec docs/agent-jump-start/canonical-spec.yaml \
+  --import
+
+# Replace canonically managed skills from local disk when needed
+# (only locally-tracked skills are eligible; upstream-tracked skills
+# from github/skills/skillfish are protected from provenance downgrade)
+agent-jump-start intake \
+  --spec docs/agent-jump-start/canonical-spec.yaml \
+  --import --replace
+
+# After intake, propagate the canonically managed set across all targets
+agent-jump-start sync \
+  --spec docs/agent-jump-start/canonical-spec.yaml
+```
+
+Important distinction:
+
+- "installed locally" means a skill package exists on disk under `.agents/skills/`, `.claude/skills/`, or `.github/skills/`
+- "managed canonically" means the skill is present in `canonical-spec.yaml` and tracked in `agent-jump-start.lock.json`
+- `sync` propagates only canonically managed skills
+- `intake` reports invalid local skills with per-skill reasons instead of importing them blindly
+
 ### Add a skill from a higher-level source
 
 `add-skill` resolves a source into a local SKILL.md package, then imports it into the canonical spec.
@@ -235,7 +270,7 @@ Notes:
 
 - `skills:` and `skillfish:` adapters require `npx` on `PATH`.
 - GitHub sources require `git` on `PATH`.
-- If a third-party tool already wrote a skill into `./.agents/skills/`, import that path into the spec so it becomes managed by Agent Jump Start.
+- If a third-party tool already wrote skills into `./.agents/skills/`, `./.claude/skills/`, or `./.github/skills/`, use `intake` to review and import them into the spec.
 - Successful `add-skill` imports also update `agent-jump-start.lock.json` next to the spec with provenance metadata for each imported skill.
 
 ### Refresh imported skills
@@ -419,6 +454,8 @@ agent-jump-start export-schema --output canonical-spec.schema.json
 ## Current Limitations
 
 - Layered specs (`extends`) are functional and write-safe for current workflows, but monorepo governance and ownership policy are not fully defined yet.
+- `intake --import --replace` is provenance-safe: skills tracked with upstream provenance (github, skills, skillfish) are never downgraded to local-directory. Only locally-tracked managed skills can be replaced via intake.
+- Broken symlinks in local skill directories are silently skipped during discovery and do not crash sync.
 - Continue, Aider, Windsurf, Cline, and Roo Code do not receive native skill packages; they receive mirrored workspace guidance plus inline skill summaries.
 - Remote skill import is currently limited to GitHub sources plus `skills` and `skillfish` adapters. Generic registries are not implemented yet.
 - Skills installed directly by third-party CLIs into `./.agents/skills/` remain unmanaged until they are imported into the canonical spec.
@@ -442,7 +479,7 @@ and reimplement the renderer elsewhere.
 npm test
 ```
 
-132 tests covering core workflows, sync command, doctor diagnostics, layered specs, writeback semantics, guided onboarding, project introspection, skill import/export, provenance lockfiles, `update-skills` refresh flows, progressive disclosure, high-level source adapters, semantic classification, mirror sync integrity, and round-trip stability.
+132 tests covering core workflows, sync command, doctor diagnostics, layered specs, writeback semantics, guided onboarding, project introspection, skill import/export, provenance lockfiles, `update-skills` refresh flows, progressive disclosure, high-level source adapters, semantic classification, mirror sync integrity, round-trip stability, provenance-safe intake replace, and symlink resilience.
 
 ## Contributing
 
