@@ -95,12 +95,19 @@ Use `init --guided` when you want Agent Jump Start to inspect the repository and
 agent-jump-start init --guided --target .
 ```
 
-Guided onboarding currently scans for:
+Guided onboarding scans for:
 
 - `package.json` dependency signals such as Express, React, Next.js, Vue, NestJS, Fastify, MUI, Tailwind, AWS SDKs
+- `package.json` scripts such as `test`, `lint`, `typecheck`, `build`
 - Python manifests such as `pyproject.toml`, `requirements.txt`, `Pipfile`, `setup.py`
+- `pyproject.toml` tool sections such as `[tool.pytest]`, `[tool.ruff]`, `[tool.mypy]`
 - mixed-runtime signals such as `pymilvus`, `boto3`, FastAPI, Django, Flask
 - lockfiles to infer npm / yarn / pnpm / bun
+- `Makefile` / `justfile` validation targets
+- `.github/workflows/*.yml` run commands
+- `.pre-commit-config.yaml` hooks
+- linter/formatter configs (`.eslintrc*`, `.prettierrc*`, `ruff.toml`, `.editorconfig`)
+- `CONTRIBUTING.md` development conventions
 - `Dockerfile`, `docker-compose.yml`, `.github/workflows`, `tsconfig.json`
 
 The guided flow proposes:
@@ -110,7 +117,12 @@ The guided flow proposes:
 - repository components
 - package manager rule
 - runtime rule
+- **suggested validation commands** (detected from package.json scripts, Makefile, CI workflows)
+- **suggested workspace sections** (inferred from TypeScript, linter configs, CONTRIBUTING.md)
 - whether to keep the review checklist
+- **suggested checklist enhancements** (derived from detected validation commands)
+
+Every suggestion carries a provenance label (`detected` or `inferred`) so the operator can see where each item came from. Suggestions are shown for review and must be accepted before they become part of the canonical spec.
 
 It works both in a real TTY and with piped stdin, so it can be tested or automated in CI.
 
@@ -126,6 +138,34 @@ Open `docs/agent-jump-start/canonical-spec.yaml` and fill in:
 - Validation commands
 - Review checklist
 - Skills (optional)
+
+If you used `init --guided`, many of these fields are already populated from repo evidence. If you started from a blank spec, you can use `infer` to discover validation commands, workspace rules, and checklist items from the repository:
+
+```bash
+# Preview what the tool can detect from the repo
+agent-jump-start infer --target .
+
+# Export a structured JSON inference report with provenance labels
+agent-jump-start infer --target . --output inferred-report.json --format json
+```
+
+`infer` exports a structured inference report with provenance labels (`detected` / `inferred`) for operator review. When you need a machine-ready spec fragment instead, use `infer-overlay`:
+
+```bash
+# Generate a layered overlay that extends a base spec
+agent-jump-start infer-overlay --target . --base canonical-spec.yaml --output overlay.yaml
+
+# Generate a partial overlay fragment for manual merge/review
+agent-jump-start infer-overlay --target . --output overlay-fragment.yaml
+
+# Restrict to a specific section
+agent-jump-start infer-overlay --target . --section validation
+```
+
+`infer-overlay` strips provenance metadata and reshapes inference output to match the canonical JSON Schema.
+
+- with `--base`, it generates a layered overlay that can be validated and used directly with `render` / `sync`
+- without `--base`, it generates a partial overlay fragment that is useful for manual merge or further editing, but may not validate on its own
 
 The spec uses a strict YAML subset that is also valid JSON and can be parsed with `JSON.parse`, keeping the generator zero-dependency.
 
@@ -145,9 +185,16 @@ If `sync` finds local skill packages under `.agents/skills/`, `.claude/skills/`,
 ```bash
 agent-jump-start doctor \
   --spec docs/agent-jump-start/canonical-spec.yaml
+
+# With --suggest: show inferred replacements alongside warnings
+agent-jump-start doctor \
+  --spec docs/agent-jump-start/canonical-spec.yaml \
+  --suggest --target .
 ```
 
 `doctor` inspects the spec for placeholder text, generic validation commands, missing components, and other signs that the setup is still scaffolded rather than production-ready. Exits with code `1` when warnings are found.
+
+When `--suggest` and `--target` are provided, doctor also runs repo inference and prints suggested replacements alongside each warning. No auto-write — the operator reviews and applies what they want.
 
 ### 4. Commit
 
@@ -428,17 +475,22 @@ agent-jump-start list-profiles
 agent-jump-start init [--guided] [--profile <path>] [--target <path>]
 agent-jump-start bootstrap --base <path> [--profile <path>] [--output <path>]
 agent-jump-start sync --spec <path> [--target <path>]
-agent-jump-start doctor --spec <path>
+agent-jump-start infer --target <path> [--output <path>] [--section <name>] [--format json|text]
+agent-jump-start infer-overlay --target <path> [--output <path>] [--base <path>] [--section <name>]
+agent-jump-start doctor --spec <path> [--suggest --target <path>]
 agent-jump-start render --spec <path> [--target <path>] [--clean]
 agent-jump-start check --spec <path> [--target <path>]
 agent-jump-start validate --spec <path>
 
 agent-jump-start validate-skill <path>
+agent-jump-start intake --spec <path> [--target <path>] [--import] [--replace]
 agent-jump-start import-skill --spec <path> --skill <path> [--replace]
 agent-jump-start add-skill <source> --spec <path> [--skill <name>] [--replace] [--provider <name>]
 agent-jump-start export-skill --spec <path> --slug <name> --output <path>
 agent-jump-start update-skills --spec <path> [--skill <slug>] [--dry-run]
 agent-jump-start export-schema [--output <path>]
+agent-jump-start demo-clean --target <path>
+agent-jump-start demo-tree --target <path>
 ```
 
 The most reliable execution paths are `agent-jump-start` after a global install and the vendored `node docs/agent-jump-start/scripts/agent-jump-start.mjs`. `npx @marcogoldin/agent-jump-start@latest ...` may also work, but some npm environments do not resolve the published bin consistently.
@@ -454,6 +506,7 @@ agent-jump-start export-schema --output canonical-spec.schema.json
 ## Current Limitations
 
 - Layered specs (`extends`) are functional and write-safe for current workflows, but monorepo governance and ownership policy are not fully defined yet.
+- `infer-overlay --base <spec>` produces a layered overlay that can be validated directly. Without `--base`, the command emits a partial overlay fragment intended for manual merge or further editing.
 - `intake --import --replace` is provenance-safe: skills tracked with upstream provenance (github, skills, skillfish) are never downgraded to local-directory. Only locally-tracked managed skills can be replaced via intake.
 - Broken symlinks in local skill directories are silently skipped during discovery and do not crash sync.
 - Continue, Aider, Windsurf, Cline, and Roo Code do not receive native skill packages; they receive mirrored workspace guidance plus inline skill summaries.
@@ -479,7 +532,7 @@ and reimplement the renderer elsewhere.
 npm test
 ```
 
-132 tests covering core workflows, sync command, doctor diagnostics, layered specs, writeback semantics, guided onboarding, project introspection, skill import/export, provenance lockfiles, `update-skills` refresh flows, progressive disclosure, high-level source adapters, semantic classification, mirror sync integrity, round-trip stability, provenance-safe intake replace, and symlink resilience.
+180 tests covering core workflows, sync command, doctor diagnostics, layered specs, writeback semantics, deep introspection, spec inference, overlay generation, assisted bootstrap, guided onboarding, project introspection, skill import/export, provenance lockfiles, `update-skills` refresh flows, progressive disclosure, high-level source adapters, semantic classification, mirror sync integrity, round-trip stability, provenance-safe intake replace, and symlink resilience.
 
 ## Contributing
 

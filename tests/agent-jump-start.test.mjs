@@ -4,8 +4,10 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync, existsSync
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
-import { introspectProject, formatDetectedComponents, suggestPackageManagerRule, suggestRuntimeRule } from "../lib/introspection.mjs";
+import { introspectProject, formatDetectedComponents, suggestPackageManagerRule, suggestRuntimeRule, deepIntrospect } from "../lib/introspection.mjs";
+import { inferValidation, inferSections, inferChecklist, buildOverlayFromEvidence } from "../lib/inference.mjs";
 import { mergeByKey, mergeSpecLayers, resolveLayeredSpec, resolveLayeredSpecWithMeta } from "../lib/merging.mjs";
+import { validateSpec } from "../lib/validation.mjs";
 import { discoverUnmanagedSkills } from "../lib/intake.mjs";
 import { findSkillCandidates } from "../lib/skills.mjs";
 
@@ -4046,4 +4048,946 @@ test("update-skills on overlay spec preserves extends and writes only to the lea
   } finally {
     cleanupTempDir(tempDir);
   }
+});
+
+// ===========================================================================
+// Deep introspection tests
+// ===========================================================================
+
+test("deepIntrospect extracts package.json scripts as validation commands", () => {
+  const tempDir = makeTempDir();
+  try {
+    writeFileSync(join(tempDir, "package.json"), JSON.stringify({
+      name: "test-app",
+      scripts: {
+        test: "jest",
+        lint: "eslint src/",
+        build: "tsc",
+        start: "node dist/index.js",
+        typecheck: "tsc --noEmit",
+      },
+      dependencies: { express: "^4.18.0" },
+    }), "utf8");
+
+    const evidence = deepIntrospect(tempDir);
+
+    assert.ok(evidence.scripts.length >= 3, "Should extract at least test, lint, build");
+    assert.ok(evidence.scripts.some((s) => s.command === "npm run test"), "Should have npm run test");
+    assert.ok(evidence.scripts.some((s) => s.command === "npm run lint"), "Should have npm run lint");
+    assert.ok(evidence.scripts.some((s) => s.command === "npm run build"), "Should have npm run build");
+    assert.ok(evidence.scripts.some((s) => s.command === "npm run typecheck"), "Should have npm run typecheck");
+    // "start" should NOT be extracted (not a validation key)
+    assert.ok(!evidence.scripts.some((s) => s.command === "npm run start"), "Should not extract start script");
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("deepIntrospect uses detected package manager for script commands", () => {
+  const tempDir = makeTempDir();
+  try {
+    writeFileSync(join(tempDir, "package.json"), JSON.stringify({
+      name: "pnpm-app",
+      scripts: { test: "vitest", lint: "eslint ." },
+    }), "utf8");
+    writeFileSync(join(tempDir, "pnpm-lock.yaml"), "lockfileVersion: 6\n", "utf8");
+
+    const evidence = deepIntrospect(tempDir);
+
+    assert.ok(evidence.scripts.some((s) => s.command === "pnpm run test"), "Should use pnpm prefix");
+    assert.ok(evidence.scripts.some((s) => s.command === "pnpm run lint"), "Should use pnpm prefix");
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("deepIntrospect extracts Makefile targets", () => {
+  const tempDir = makeTempDir();
+  try {
+    writeFileSync(join(tempDir, "Makefile"), `
+.PHONY: test lint build
+
+test:
+\tpytest tests/
+
+lint:
+\truff check .
+
+build:
+\tdocker build -t app .
+
+deploy:
+\tkubectl apply -f k8s/
+`, "utf8");
+
+    const evidence = deepIntrospect(tempDir);
+
+    assert.ok(evidence.makeTargets.some((t) => t.target === "test" && t.command === "make test"));
+    assert.ok(evidence.makeTargets.some((t) => t.target === "lint" && t.command === "make lint"));
+    assert.ok(evidence.makeTargets.some((t) => t.target === "build" && t.command === "make build"));
+    // deploy is NOT a validation target
+    assert.ok(!evidence.makeTargets.some((t) => t.target === "deploy"));
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("deepIntrospect extracts CI workflow run commands", () => {
+  const tempDir = makeTempDir();
+  try {
+    mkdirSync(join(tempDir, ".github", "workflows"), { recursive: true });
+    writeFileSync(join(tempDir, ".github", "workflows", "ci.yml"), `
+name: CI
+on: [push]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+      - run: echo "done"
+`, "utf8");
+
+    const evidence = deepIntrospect(tempDir);
+
+    assert.ok(evidence.ciSteps.length >= 2, "Should extract at least lint and test CI steps");
+    assert.ok(evidence.ciSteps.some((s) => /lint/.test(s.command)));
+    assert.ok(evidence.ciSteps.some((s) => /test/.test(s.command)));
+    // "echo done" and "npm ci" should not be extracted
+    assert.ok(!evidence.ciSteps.some((s) => /echo/.test(s.command)));
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("deepIntrospect detects pre-commit hooks", () => {
+  const tempDir = makeTempDir();
+  try {
+    writeFileSync(join(tempDir, ".pre-commit-config.yaml"), `
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    hooks:
+      - id: ruff
+      - id: ruff-format
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    hooks:
+      - id: mypy
+`, "utf8");
+
+    const evidence = deepIntrospect(tempDir);
+
+    assert.ok(evidence.preCommitHooks.some((h) => h.id === "ruff"));
+    assert.ok(evidence.preCommitHooks.some((h) => h.id === "ruff-format"));
+    assert.ok(evidence.preCommitHooks.some((h) => h.id === "mypy"));
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("deepIntrospect detects linter config files", () => {
+  const tempDir = makeTempDir();
+  try {
+    writeFileSync(join(tempDir, ".eslintrc.json"), "{}", "utf8");
+    writeFileSync(join(tempDir, ".prettierrc"), "{}", "utf8");
+    writeFileSync(join(tempDir, ".editorconfig"), "root = true\n", "utf8");
+
+    const evidence = deepIntrospect(tempDir);
+
+    assert.ok(evidence.linterConfigs.some((c) => c.tool === "eslint"));
+    assert.ok(evidence.linterConfigs.some((c) => c.tool === "prettier"));
+    assert.ok(evidence.linterConfigs.some((c) => c.tool === "editorconfig"));
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("deepIntrospect extracts conventions from CONTRIBUTING.md", () => {
+  const tempDir = makeTempDir();
+  try {
+    writeFileSync(join(tempDir, "CONTRIBUTING.md"), `# Contributing
+
+## Development Setup
+
+- Install dependencies with npm install
+- Run tests before submitting PRs
+- Follow the existing code style
+
+## Testing
+
+- Write unit tests for new features
+- Run npm test to verify
+
+## Deployment
+
+This section is not about development.
+`, "utf8");
+
+    const evidence = deepIntrospect(tempDir);
+
+    assert.ok(evidence.conventions.length >= 1, "Should extract at least one convention section");
+    assert.ok(evidence.conventions.some((c) => c.source === "CONTRIBUTING.md"));
+    assert.ok(evidence.conventions.some((c) => /setup|testing/i.test(c.heading)));
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("deepIntrospect returns empty evidence for empty directory", () => {
+  const tempDir = makeTempDir();
+  try {
+    const evidence = deepIntrospect(tempDir);
+
+    assert.equal(evidence.scripts.length, 0);
+    assert.equal(evidence.ciSteps.length, 0);
+    assert.equal(evidence.linterConfigs.length, 0);
+    assert.equal(evidence.conventions.length, 0);
+    assert.equal(evidence.preCommitHooks.length, 0);
+    assert.equal(evidence.makeTargets.length, 0);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("deepIntrospect detects pyproject.toml tool sections", () => {
+  const tempDir = makeTempDir();
+  try {
+    writeFileSync(join(tempDir, "pyproject.toml"), `
+[project]
+name = "my-python-app"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 88
+
+[tool.mypy]
+strict = true
+`, "utf8");
+
+    const evidence = deepIntrospect(tempDir);
+
+    assert.ok(evidence.pyprojectTools.tools.some((t) => t.tool === "pytest"));
+    assert.ok(evidence.pyprojectTools.tools.some((t) => t.tool === "ruff"));
+    assert.ok(evidence.pyprojectTools.tools.some((t) => t.tool === "mypy"));
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+// ===========================================================================
+// Inference engine tests
+// ===========================================================================
+
+test("inferValidation produces detected commands from package.json scripts", () => {
+  const evidence = {
+    base: { packageManager: "npm", runtimes: ["Node.js"], signals: [], components: [] },
+    scripts: [
+      { command: "npm run test", source: "package.json scripts.test", raw: "jest" },
+      { command: "npm run lint", source: "package.json scripts.lint", raw: "eslint ." },
+    ],
+    pyprojectTools: { scripts: [], tools: [] },
+    ciSteps: [],
+    linterConfigs: [],
+    conventions: [],
+    preCommitHooks: [],
+    makeTargets: [],
+  };
+
+  const result = inferValidation(evidence);
+
+  assert.ok(result.length >= 2);
+  assert.ok(result.some((v) => v.value === "npm run test" && v.provenance === "detected"));
+  assert.ok(result.some((v) => v.value === "npm run lint" && v.provenance === "detected"));
+});
+
+test("inferValidation deduplicates commands across sources", () => {
+  const evidence = {
+    base: { packageManager: "npm", runtimes: ["Node.js"], signals: [], components: [] },
+    scripts: [
+      { command: "npm run test", source: "package.json scripts.test", raw: "jest" },
+    ],
+    pyprojectTools: { scripts: [], tools: [] },
+    ciSteps: [
+      { command: "npm run test", source: ".github/workflows/ci.yml", workflow: "ci.yml" },
+    ],
+    linterConfigs: [],
+    conventions: [],
+    preCommitHooks: [],
+    makeTargets: [],
+  };
+
+  const result = inferValidation(evidence);
+
+  // Should deduplicate: only one "npm run test"
+  const testEntries = result.filter((v) => /npm run test/i.test(v.value));
+  assert.equal(testEntries.length, 1, "Should deduplicate identical commands");
+  assert.equal(testEntries[0].provenance, "detected", "package.json (priority 1) should win over CI");
+});
+
+test("inferValidation maps pre-commit hooks to known commands", () => {
+  const evidence = {
+    base: { packageManager: null, runtimes: ["Python"], signals: [], components: [] },
+    scripts: [],
+    pyprojectTools: { scripts: [], tools: [] },
+    ciSteps: [],
+    linterConfigs: [],
+    conventions: [],
+    preCommitHooks: [
+      { id: "ruff", source: ".pre-commit-config.yaml" },
+      { id: "mypy", source: ".pre-commit-config.yaml" },
+    ],
+    makeTargets: [],
+  };
+
+  const result = inferValidation(evidence);
+
+  assert.ok(result.some((v) => v.value === "ruff check ." && v.provenance === "inferred"));
+  assert.ok(result.some((v) => v.value === "mypy ." && v.provenance === "inferred"));
+});
+
+test("inferValidation caps at 8 commands", () => {
+  const evidence = {
+    base: { packageManager: "npm", runtimes: ["Node.js"], signals: [], components: [] },
+    scripts: Array.from({ length: 10 }, (_, i) => ({
+      command: `npm run script-${i}`,
+      source: `package.json scripts.script-${i}`,
+      raw: `cmd-${i}`,
+    })),
+    pyprojectTools: { scripts: [], tools: [] },
+    ciSteps: [],
+    linterConfigs: [],
+    conventions: [],
+    preCommitHooks: [],
+    makeTargets: [],
+  };
+
+  const result = inferValidation(evidence);
+
+  assert.ok(result.length <= 8, `Should cap at 8, got ${result.length}`);
+});
+
+test("inferSections produces TypeScript section when tsconfig detected", () => {
+  const evidence = {
+    base: {
+      packageManager: "npm", runtimes: ["Node.js"], components: [],
+      signals: [{ type: "config", file: "tsconfig.json", detail: "TypeScript project" }],
+    },
+    scripts: [],
+    pyprojectTools: { scripts: [], tools: [] },
+    ciSteps: [],
+    linterConfigs: [],
+    conventions: [],
+    preCommitHooks: [],
+    makeTargets: [],
+  };
+
+  const result = inferSections(evidence);
+
+  assert.ok(result.some((s) => s.title === "TypeScript rules"));
+  const tsSection = result.find((s) => s.title === "TypeScript rules");
+  assert.ok(tsSection.rules.length >= 2);
+  assert.ok(tsSection.rules.every((r) => r.provenance === "inferred"));
+});
+
+test("inferSections produces Code style section from linter configs", () => {
+  const evidence = {
+    base: { packageManager: "npm", runtimes: ["Node.js"], signals: [], components: [] },
+    scripts: [],
+    pyprojectTools: { scripts: [], tools: [] },
+    ciSteps: [],
+    linterConfigs: [
+      { tool: "eslint", file: ".eslintrc.json" },
+      { tool: "prettier", file: ".prettierrc" },
+    ],
+    conventions: [],
+    preCommitHooks: [],
+    makeTargets: [],
+  };
+
+  const result = inferSections(evidence);
+
+  assert.ok(result.some((s) => s.title === "Code style"));
+  const codeStyle = result.find((s) => s.title === "Code style");
+  assert.ok(codeStyle.rules.length >= 1);
+  assert.ok(codeStyle.rules.some((r) => /eslint.*prettier/i.test(r.value) || /authoritative/i.test(r.value)));
+});
+
+test("inferSections returns empty for empty evidence", () => {
+  const evidence = {
+    base: { packageManager: null, runtimes: [], signals: [], components: [] },
+    scripts: [],
+    pyprojectTools: { scripts: [], tools: [] },
+    ciSteps: [],
+    linterConfigs: [],
+    conventions: [],
+    preCommitHooks: [],
+    makeTargets: [],
+  };
+
+  const result = inferSections(evidence);
+
+  assert.equal(result.length, 0, "No sections for empty evidence");
+});
+
+test("inferChecklist produces items from detected validation commands", () => {
+  const evidence = {
+    base: { packageManager: "npm", runtimes: ["Node.js"], signals: [], components: [] },
+    scripts: [
+      { command: "npm run test", source: "package.json scripts.test", raw: "jest" },
+      { command: "npm run lint", source: "package.json scripts.lint", raw: "eslint ." },
+    ],
+    pyprojectTools: { scripts: [], tools: [] },
+    ciSteps: [],
+    linterConfigs: [],
+    conventions: [],
+    preCommitHooks: [],
+    makeTargets: [],
+  };
+
+  const result = inferChecklist(evidence);
+
+  assert.ok(result.items.some((i) => /test/i.test(i.value)));
+  assert.ok(result.items.some((i) => /lint/i.test(i.value)));
+  // Always has the default red flag
+  assert.ok(result.redFlags.some((r) => /hand-edited/i.test(r.value)));
+});
+
+test("inferChecklist adds TypeScript red flags when TypeScript detected", () => {
+  const evidence = {
+    base: {
+      packageManager: "npm", runtimes: ["Node.js"], components: [],
+      signals: [{ type: "config", file: "tsconfig.json", detail: "TypeScript project" }],
+    },
+    scripts: [
+      { command: "npm run typecheck", source: "package.json scripts.typecheck", raw: "tsc --noEmit" },
+    ],
+    pyprojectTools: { scripts: [], tools: [] },
+    ciSteps: [],
+    linterConfigs: [],
+    conventions: [],
+    preCommitHooks: [],
+    makeTargets: [],
+  };
+
+  const result = inferChecklist(evidence);
+
+  assert.ok(result.items.some((i) => /type check/i.test(i.value)));
+  assert.ok(result.redFlags.some((r) => /any/i.test(r.value)));
+});
+
+// ===========================================================================
+// CLI infer command tests
+// ===========================================================================
+
+test("infer command prints labeled suggestions for a Node.js project", () => {
+  const tempDir = makeTempDir();
+  try {
+    writeFileSync(join(tempDir, "package.json"), JSON.stringify({
+      name: "infer-test",
+      scripts: { test: "jest", lint: "eslint ." },
+      dependencies: { typescript: "^5.0.0" },
+    }), "utf8");
+    writeFileSync(join(tempDir, "tsconfig.json"), "{}", "utf8");
+
+    const result = spawnSync(process.execPath, [
+      scriptPath, "infer", "--target", tempDir,
+    ], { encoding: "utf8" });
+
+    assert.equal(result.status, 0, `Expected success.\nSTDOUT:\n${result.stdout}\nSTDERR:\n${result.stderr}`);
+    assert.match(result.stdout, /\[detected\].*npm run test/);
+    assert.match(result.stdout, /\[detected\].*npm run lint/);
+    assert.match(result.stdout, /Validation commands:/);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("infer command outputs JSON with --format json", () => {
+  const tempDir = makeTempDir();
+  try {
+    writeFileSync(join(tempDir, "package.json"), JSON.stringify({
+      name: "json-infer-test",
+      scripts: { test: "vitest", build: "tsc" },
+    }), "utf8");
+
+    const result = spawnSync(process.execPath, [
+      scriptPath, "infer", "--target", tempDir, "--format", "json",
+    ], { encoding: "utf8" });
+
+    assert.equal(result.status, 0, `Expected success.\nSTDOUT:\n${result.stdout}\nSTDERR:\n${result.stderr}`);
+    const parsed = JSON.parse(result.stdout);
+    assert.ok(Array.isArray(parsed.validation), "Should have validation array");
+    assert.ok(parsed.validation.some((v) => v.provenance === "detected"));
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("infer command writes a JSON inference report to --output", () => {
+  const tempDir = makeTempDir();
+  try {
+    writeFileSync(join(tempDir, "package.json"), JSON.stringify({
+      name: "output-infer-test",
+      scripts: { test: "jest", lint: "eslint ." },
+    }), "utf8");
+
+    const outputPath = join(tempDir, "inferred.json");
+    const result = spawnSync(process.execPath, [
+      scriptPath, "infer", "--target", tempDir, "--output", outputPath,
+    ], { encoding: "utf8" });
+
+    assert.equal(result.status, 0, `Expected success.\nSTDOUT:\n${result.stdout}\nSTDERR:\n${result.stderr}`);
+    assert.ok(existsSync(outputPath), "Output file should be written");
+    const parsed = JSON.parse(readFileSync(outputPath, "utf8"));
+    assert.ok(Array.isArray(parsed.validation));
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("infer command reports nothing for empty directory", () => {
+  const tempDir = makeTempDir();
+  try {
+    const result = spawnSync(process.execPath, [
+      scriptPath, "infer", "--target", tempDir,
+    ], { encoding: "utf8" });
+
+    assert.equal(result.status, 0);
+    assert.match(result.stdout, /No suggestions inferred/);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("infer --section validation only outputs validation", () => {
+  const tempDir = makeTempDir();
+  try {
+    writeFileSync(join(tempDir, "package.json"), JSON.stringify({
+      name: "section-filter-test",
+      scripts: { test: "jest", lint: "eslint ." },
+    }), "utf8");
+    writeFileSync(join(tempDir, ".eslintrc.json"), "{}", "utf8");
+
+    const result = spawnSync(process.execPath, [
+      scriptPath, "infer", "--target", tempDir, "--section", "validation", "--format", "json",
+    ], { encoding: "utf8" });
+
+    assert.equal(result.status, 0);
+    const parsed = JSON.parse(result.stdout);
+    assert.ok(Array.isArray(parsed.validation), "Should have validation");
+    assert.equal(parsed.sections, undefined, "Should not have sections when filtered");
+    assert.equal(parsed.checklist, undefined, "Should not have checklist when filtered");
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+// ===========================================================================
+// Doctor --suggest tests
+// ===========================================================================
+
+test("doctor --suggest prints inferred validation commands alongside warnings", () => {
+  const tempDir = makeTempDir();
+  try {
+    // Create a spec with generic validation
+    const specPath = join(tempDir, "canonical-spec.yaml");
+    writeFileSync(specPath, JSON.stringify({
+      schemaVersion: 1,
+      project: { name: "suggest-test", summary: "Test project.", components: ["api: Express"] },
+      workspaceInstructions: {
+        packageManagerRule: "Use npm.",
+        runtimeRule: "Keep aligned.",
+        sections: [{ title: "General rules", rules: ["Prefer small changes."] }],
+        validation: ["Document the baseline validation commands for this repository."],
+      },
+      skills: [],
+    }), "utf8");
+
+    // Create package.json with real scripts
+    writeFileSync(join(tempDir, "package.json"), JSON.stringify({
+      name: "suggest-test",
+      scripts: { test: "jest", lint: "eslint ." },
+    }), "utf8");
+
+    const result = spawnSync(process.execPath, [
+      scriptPath, "doctor", "--spec", specPath, "--suggest", "--target", tempDir,
+    ], { encoding: "utf8" });
+
+    // doctor exits with 1 because of warnings, but should print suggestions
+    assert.match(result.stdout, /Suggested validation commands/);
+    assert.match(result.stdout, /\[detected\].*npm run test/);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+// ===========================================================================
+// Enhanced guided setup with inference tests
+// ===========================================================================
+
+test("init --guided with scripts proposes validation commands in interactive flow", () => {
+  const tempDir = makeTempDir();
+  try {
+    writeFileSync(join(tempDir, "package.json"), JSON.stringify({
+      name: "guided-infer-test",
+      scripts: { test: "jest", lint: "eslint ." },
+      dependencies: { express: "^4.18.0" },
+    }), "utf8");
+
+    // Pipe answers: name, summary, components, accept validation, accept sections (if any),
+    // include checklist, accept checklist suggestions (if any), no skills
+    // The exact number depends on which inference steps have content.
+    // For a project with test+lint scripts and express dependency:
+    // 1. project name (accept default)
+    // 2. summary
+    // 3. accept components (y)
+    // 4. accept validation (y)
+    // 5. include checklist (y)
+    // 6. accept checklist suggestions (y)
+    // 7. import skills (n)
+    const stdinInput = "\nA guided test app\ny\ny\ny\ny\nn\n";
+
+    const result = spawnSync(process.execPath, [
+      scriptPath, "init", "--guided", "--target", tempDir,
+    ], {
+      encoding: "utf8",
+      input: stdinInput,
+    });
+
+    assert.equal(result.status, 0,
+      `Expected success.\nSTDOUT:\n${result.stdout}\nSTDERR:\n${result.stderr}`);
+
+    // Verify the spec has real validation commands, not placeholders
+    const specPath = join(tempDir, "docs/agent-jump-start/canonical-spec.yaml");
+    assert.ok(existsSync(specPath), "Canonical spec should exist");
+    const spec = JSON.parse(readFileSync(specPath, "utf8"));
+
+    assert.ok(Array.isArray(spec.workspaceInstructions.validation));
+    assert.ok(spec.workspaceInstructions.validation.some((v) => /npm run test/.test(v)),
+      `Validation should contain detected commands, got: ${JSON.stringify(spec.workspaceInstructions.validation)}`);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+// ===========================================================================
+// buildOverlayFromEvidence unit tests (T5)
+// ===========================================================================
+
+test("buildOverlayFromEvidence produces validation strings without provenance", () => {
+  const evidence = {
+    base: {
+      packageManager: "npm", runtimes: ["Node.js"], components: [],
+      signals: [],
+    },
+    scripts: [
+      { command: "npm run test", source: "package.json scripts.test", raw: "jest" },
+      { command: "npm run lint", source: "package.json scripts.lint", raw: "eslint ." },
+    ],
+    pyprojectTools: { scripts: [], tools: [] },
+    ciSteps: [],
+    linterConfigs: [],
+    conventions: [],
+    preCommitHooks: [],
+    makeTargets: [],
+  };
+
+  const overlay = buildOverlayFromEvidence(evidence);
+
+  assert.ok(overlay.workspaceInstructions, "Should have workspaceInstructions");
+  assert.ok(Array.isArray(overlay.workspaceInstructions.validation), "Should have validation");
+  for (const v of overlay.workspaceInstructions.validation) {
+    assert.equal(typeof v, "string", "Validation entries must be plain strings");
+  }
+  assert.ok(overlay.workspaceInstructions.validation.some((v) => /npm run test/.test(v)));
+});
+
+test("buildOverlayFromEvidence strips provenance from sections rules", () => {
+  const evidence = {
+    base: {
+      packageManager: "npm", runtimes: ["Node.js"], components: [],
+      signals: [{ type: "config", file: "tsconfig.json", detail: "TypeScript project" }],
+    },
+    scripts: [],
+    pyprojectTools: { scripts: [], tools: [] },
+    ciSteps: [],
+    linterConfigs: [{ file: ".eslintrc.json", tool: "eslint" }],
+    conventions: [],
+    preCommitHooks: [],
+    makeTargets: [],
+  };
+
+  const overlay = buildOverlayFromEvidence(evidence);
+
+  assert.ok(overlay.workspaceInstructions?.sections, "Should have sections");
+  for (const section of overlay.workspaceInstructions.sections) {
+    assert.equal(typeof section.title, "string", "Section title must be string");
+    assert.ok(Array.isArray(section.rules), "Section rules must be array");
+    for (const rule of section.rules) {
+      assert.equal(typeof rule, "string", "Rule entries must be plain strings");
+    }
+  }
+});
+
+test("buildOverlayFromEvidence adds extends field when base is specified", () => {
+  const evidence = {
+    base: {
+      packageManager: "npm", runtimes: ["Node.js"], components: [],
+      signals: [],
+    },
+    scripts: [{ command: "npm test", source: "package.json scripts.test", raw: "jest" }],
+    pyprojectTools: { scripts: [], tools: [] },
+    ciSteps: [],
+    linterConfigs: [],
+    conventions: [],
+    preCommitHooks: [],
+    makeTargets: [],
+  };
+
+  const overlay = buildOverlayFromEvidence(evidence, { base: "base-spec.yaml" });
+
+  assert.equal(overlay.extends, "base-spec.yaml");
+  assert.equal(overlay.schemaVersion, undefined, "Overlay with extends should not have schemaVersion");
+  assert.equal(overlay.project, undefined, "Overlay with extends should not have project");
+});
+
+test("buildOverlayFromEvidence omits reviewChecklist when no items", () => {
+  const evidence = {
+    base: {
+      packageManager: "npm", runtimes: ["Node.js"], components: [],
+      signals: [],
+    },
+    scripts: [],
+    pyprojectTools: { scripts: [], tools: [] },
+    ciSteps: [],
+    linterConfigs: [],
+    conventions: [],
+    preCommitHooks: [],
+    makeTargets: [],
+  };
+
+  const overlay = buildOverlayFromEvidence(evidence);
+
+  assert.equal(overlay.reviewChecklist, undefined,
+    "reviewChecklist must be omitted when no items (schema requires minItems: 1)");
+});
+
+test("buildOverlayFromEvidence generates reviewChecklist with correct structure", () => {
+  const evidence = {
+    base: {
+      packageManager: "npm", runtimes: ["Node.js"], components: [],
+      signals: [{ type: "config", file: "tsconfig.json", detail: "TypeScript project" }],
+    },
+    scripts: [
+      { command: "npm run test", source: "package.json scripts.test", raw: "jest" },
+      { command: "npm run lint", source: "package.json scripts.lint", raw: "eslint ." },
+    ],
+    pyprojectTools: { scripts: [], tools: [] },
+    ciSteps: [],
+    linterConfigs: [],
+    conventions: [],
+    preCommitHooks: [],
+    makeTargets: [],
+  };
+
+  const overlay = buildOverlayFromEvidence(evidence);
+
+  if (overlay.reviewChecklist) {
+    const rc = overlay.reviewChecklist;
+    assert.equal(typeof rc.intro, "string", "intro must be string");
+    assert.equal(typeof rc.failureThreshold, "number", "failureThreshold must be number");
+    assert.ok(rc.failureThreshold >= 1, "failureThreshold must be >= 1");
+    assert.ok(Array.isArray(rc.items), "items must be array");
+    assert.ok(rc.items.length >= 1, "items must have at least 1 entry (schema minItems: 1)");
+    for (const item of rc.items) {
+      assert.equal(typeof item.title, "string", "Checklist item must use { title } shape");
+      assert.equal(item.value, undefined, "Checklist item must not have raw 'value' key");
+      assert.equal(item.provenance, undefined, "Checklist item must not have 'provenance'");
+    }
+  }
+});
+
+test("buildOverlayFromEvidence respects section filter", () => {
+  const evidence = {
+    base: {
+      packageManager: "npm", runtimes: ["Node.js"], components: [],
+      signals: [{ type: "config", file: "tsconfig.json", detail: "TypeScript project" }],
+    },
+    scripts: [
+      { command: "npm run test", source: "package.json scripts.test", raw: "jest" },
+    ],
+    pyprojectTools: { scripts: [], tools: [] },
+    ciSteps: [],
+    linterConfigs: [{ file: ".eslintrc.json", tool: "eslint" }],
+    conventions: [],
+    preCommitHooks: [],
+    makeTargets: [],
+  };
+
+  const validationOnly = buildOverlayFromEvidence(evidence, { section: "validation" });
+  assert.ok(validationOnly.workspaceInstructions?.validation, "Should have validation");
+  assert.equal(validationOnly.workspaceInstructions?.sections, undefined, "Should not have sections");
+  assert.equal(validationOnly.reviewChecklist, undefined, "Should not have reviewChecklist");
+
+  const rulesOnly = buildOverlayFromEvidence(evidence, { section: "rules" });
+  assert.equal(rulesOnly.workspaceInstructions?.validation, undefined, "Should not have validation");
+  assert.ok(rulesOnly.workspaceInstructions?.sections, "Should have sections");
+});
+
+// ===========================================================================
+// Integration: infer -> overlay -> validate (T6)
+// ===========================================================================
+
+test("buildOverlayFromEvidence output passes validateSpec when complete", () => {
+  // Un overlay senza `extends` ha bisogno di schemaVersion e project per
+  // passare la validazione.  Qui verifichiamo che un overlay completo
+  // (arricchito con i campi minimi) superi la validazione schema.
+  const evidence = {
+    base: {
+      packageManager: "npm", runtimes: ["Node.js"], components: ["api: Express"],
+      signals: [{ type: "config", file: "tsconfig.json", detail: "TypeScript project" }],
+    },
+    scripts: [
+      { command: "npm run test", source: "package.json scripts.test", raw: "jest" },
+      { command: "npm run lint", source: "package.json scripts.lint", raw: "eslint ." },
+    ],
+    pyprojectTools: { scripts: [], tools: [] },
+    ciSteps: [],
+    linterConfigs: [{ file: ".eslintrc.json", tool: "eslint" }],
+    conventions: [],
+    preCommitHooks: [],
+    makeTargets: [],
+  };
+
+  const overlay = buildOverlayFromEvidence(evidence);
+
+  // Arricchiamo con i campi obbligatori per uno spec completo
+  const fullSpec = {
+    schemaVersion: 1,
+    project: {
+      name: "integration-test",
+      summary: "Integration test overlay.",
+      components: ["api: Express"],
+    },
+    ...overlay,
+    skills: [],
+  };
+
+  // Non deve lanciare eccezioni
+  assert.doesNotThrow(
+    () => validateSpec(fullSpec, "integration-test-overlay"),
+    "Complete overlay enriched with required fields should pass schema validation",
+  );
+});
+
+// ===========================================================================
+// CLI infer-overlay e2e tests (T7)
+// ===========================================================================
+
+test("infer-overlay command outputs JSON to stdout", () => {
+  const tempDir = makeTempDir();
+  try {
+    writeFileSync(join(tempDir, "package.json"), JSON.stringify({
+      name: "overlay-stdout-test",
+      scripts: { test: "jest", lint: "eslint ." },
+    }), "utf8");
+
+    const result = spawnSync(process.execPath, [
+      scriptPath, "infer-overlay", "--target", tempDir,
+    ], { encoding: "utf8" });
+
+    assert.equal(result.status, 0,
+      `Expected success.\nSTDOUT:\n${result.stdout}\nSTDERR:\n${result.stderr}`);
+    const parsed = JSON.parse(result.stdout);
+    assert.ok(parsed.workspaceInstructions, "Should have workspaceInstructions");
+    assert.ok(Array.isArray(parsed.workspaceInstructions.validation),
+      "Should have validation array");
+    // Nessuna traccia di provenance nell'output
+    for (const v of parsed.workspaceInstructions.validation) {
+      assert.equal(typeof v, "string", "Validation entries in overlay must be plain strings");
+    }
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("infer-overlay command writes to --output file", () => {
+  const tempDir = makeTempDir();
+  try {
+    writeFileSync(join(tempDir, "package.json"), JSON.stringify({
+      name: "overlay-file-test",
+      scripts: { test: "vitest", build: "tsc" },
+    }), "utf8");
+    writeFileSync(join(tempDir, "tsconfig.json"), "{}", "utf8");
+
+    const outputPath = join(tempDir, "overlay.json");
+    const result = spawnSync(process.execPath, [
+      scriptPath, "infer-overlay", "--target", tempDir, "--output", outputPath,
+    ], { encoding: "utf8" });
+
+    assert.equal(result.status, 0,
+      `Expected success.\nSTDOUT:\n${result.stdout}\nSTDERR:\n${result.stderr}`);
+    assert.ok(existsSync(outputPath), "Output file should be written");
+    const parsed = JSON.parse(readFileSync(outputPath, "utf8"));
+    assert.ok(parsed.workspaceInstructions, "Should have workspaceInstructions");
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("infer-overlay command includes extends when --base is provided", () => {
+  const tempDir = makeTempDir();
+  try {
+    writeFileSync(join(tempDir, "package.json"), JSON.stringify({
+      name: "overlay-base-test",
+      scripts: { test: "jest" },
+    }), "utf8");
+
+    const result = spawnSync(process.execPath, [
+      scriptPath, "infer-overlay", "--target", tempDir, "--base", "specs/base-spec.yaml",
+    ], { encoding: "utf8" });
+
+    assert.equal(result.status, 0,
+      `Expected success.\nSTDOUT:\n${result.stdout}\nSTDERR:\n${result.stderr}`);
+    const parsed = JSON.parse(result.stdout);
+    assert.equal(parsed.extends, "specs/base-spec.yaml");
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("infer-overlay command respects --section filter", () => {
+  const tempDir = makeTempDir();
+  try {
+    writeFileSync(join(tempDir, "package.json"), JSON.stringify({
+      name: "overlay-section-test",
+      scripts: { test: "jest", lint: "eslint ." },
+    }), "utf8");
+    writeFileSync(join(tempDir, ".eslintrc.json"), "{}", "utf8");
+
+    const result = spawnSync(process.execPath, [
+      scriptPath, "infer-overlay", "--target", tempDir, "--section", "validation",
+    ], { encoding: "utf8" });
+
+    assert.equal(result.status, 0,
+      `Expected success.\nSTDOUT:\n${result.stdout}\nSTDERR:\n${result.stderr}`);
+    const parsed = JSON.parse(result.stdout);
+    assert.ok(parsed.workspaceInstructions?.validation, "Should have validation");
+    assert.equal(parsed.workspaceInstructions?.sections, undefined,
+      "Should not have sections when filtered to validation");
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("infer-overlay command fails without --target", () => {
+  const result = spawnSync(process.execPath, [
+    scriptPath, "infer-overlay",
+  ], { encoding: "utf8" });
+
+  assert.notEqual(result.status, 0, "Should fail without --target");
+  assert.match(result.stderr, /target/i);
 });
