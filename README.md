@@ -207,6 +207,8 @@ agent-jump-start intake \
   --import
 
 # Replace canonically managed skills from local disk when needed
+# (only locally-tracked skills are eligible; upstream-tracked skills
+# from github/skills/skillfish are protected from provenance downgrade)
 agent-jump-start intake \
   --spec docs/agent-jump-start/canonical-spec.yaml \
   --import --replace
@@ -452,6 +454,8 @@ agent-jump-start export-schema --output canonical-spec.schema.json
 ## Current Limitations
 
 - Layered specs (`extends`) are functional and write-safe for current workflows, but monorepo governance and ownership policy are not fully defined yet.
+- `intake --import --replace` is provenance-safe: skills tracked with upstream provenance (github, skills, skillfish) are never downgraded to local-directory. Only locally-tracked managed skills can be replaced via intake.
+- Broken symlinks in local skill directories are silently skipped during discovery and do not crash sync.
 - Continue, Aider, Windsurf, Cline, and Roo Code do not receive native skill packages; they receive mirrored workspace guidance plus inline skill summaries.
 - Remote skill import is currently limited to GitHub sources plus `skills` and `skillfish` adapters. Generic registries are not implemented yet.
 - Skills installed directly by third-party CLIs into `./.agents/skills/` remain unmanaged until they are imported into the canonical spec.
@@ -475,7 +479,7 @@ and reimplement the renderer elsewhere.
 npm test
 ```
 
-132 tests covering core workflows, sync command, doctor diagnostics, layered specs, writeback semantics, guided onboarding, project introspection, skill import/export, provenance lockfiles, `update-skills` refresh flows, progressive disclosure, high-level source adapters, semantic classification, mirror sync integrity, and round-trip stability.
+132 tests covering core workflows, sync command, doctor diagnostics, layered specs, writeback semantics, guided onboarding, project introspection, skill import/export, provenance lockfiles, `update-skills` refresh flows, progressive disclosure, high-level source adapters, semantic classification, mirror sync integrity, round-trip stability, provenance-safe intake replace, and symlink resilience.
 
 ## Contributing
 

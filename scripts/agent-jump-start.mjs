@@ -15,7 +15,7 @@ import { readExternalSkill, readSkillMdFile, readSkillDirectory, exportSkillPack
 import { CANONICAL_SPEC_SCHEMA } from "../lib/schema.mjs";
 import { runGuidedSetup } from "../lib/interactive.mjs";
 import { diagnoseSpec } from "../lib/doctor.mjs";
-import { defaultLockfilePath, makeProvenanceRecord, writeLockfileEntries } from "../lib/lockfile.mjs";
+import { defaultLockfilePath, makeProvenanceRecord, readLockfile, writeLockfileEntries } from "../lib/lockfile.mjs";
 import { makeLocalSourceInfo } from "../lib/source-info.mjs";
 import { refreshSkills } from "../lib/skills-updater.mjs";
 import { resolveLayeredSpec, resolveLayeredSpecWithMeta } from "../lib/merging.mjs";
@@ -672,11 +672,45 @@ async function main() {
       return;
     }
 
-    const eligible = discoveries.filter((entry) =>
-      entry.status === "unmanaged" || (Boolean(options.replace) && entry.status === "managed"),
+    // Build the set of upstream-tracked slugs so that --replace does
+    // not overwrite their provenance with local-directory.  A skill
+    // whose lockfile entry has a non-local sourceType (github, skills,
+    // skillfish) must not be re-imported from a local mirror.
+    const upstreamTrackedSlugs = new Set();
+    if (options.replace) {
+      const lockfilePath = defaultLockfilePath(options.spec);
+      try {
+        const lockfile = readLockfile(lockfilePath);
+        for (const entry of lockfile.skills ?? []) {
+          if (entry.sourceType === "github" || entry.sourceType === "skills" || entry.sourceType === "skillfish") {
+            upstreamTrackedSlugs.add(entry.slug);
+          }
+        }
+      } catch {
+        // No lockfile or invalid — nothing to protect.
+      }
+    }
+
+    const eligible = discoveries.filter((entry) => {
+      if (entry.status === "unmanaged") return true;
+      if (entry.status === "managed" && Boolean(options.replace)) {
+        if (upstreamTrackedSlugs.has(entry.slug)) return false;
+        return true;
+      }
+      return false;
+    });
+
+    const skippedUpstream = discoveries.filter(
+      (entry) => entry.status === "managed" && Boolean(options.replace) && upstreamTrackedSlugs.has(entry.slug),
     );
 
     if (eligible.length === 0) {
+      if (skippedUpstream.length > 0) {
+        console.log(`\nSkipped ${skippedUpstream.length} upstream-tracked skill(s) (provenance preserved):`);
+        for (const entry of skippedUpstream) {
+          console.log(`  ${entry.slug}`);
+        }
+      }
       console.log("\nNo skill packages eligible for import.");
       return;
     }
@@ -697,6 +731,12 @@ async function main() {
 
     const { invalid } = summarizeDiscoveries(discoveries);
     console.log("");
+    if (skippedUpstream.length > 0) {
+      console.log(`Skipped ${skippedUpstream.length} upstream-tracked skill(s) (provenance preserved):`);
+      for (const entry of skippedUpstream) {
+        console.log(`  ${entry.slug}`);
+      }
+    }
     console.log(
       `Import summary: ${added} added, ${replaced} replaced, ${invalid.length} invalid, ` +
       `${discoveries.length - eligible.length - invalid.length} already managed and skipped`,
