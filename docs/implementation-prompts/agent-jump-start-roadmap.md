@@ -43,12 +43,7 @@ What to build:
 - inference grounded in actual repo evidence: `package.json`, `pyproject.toml`, `Makefile`, `justfile`, `.pre-commit-config.yaml`, CI workflows, `README.md`, `CONTRIBUTING.md`, ADRs,
 - a clear UI distinction between **detected**, **inferred**, and **confirmed** content while drafting; once confirmed, the canonical spec contains no machine annotations.
 
-Observed in live onboarding tests on 2026-04-12, after the second overhaul pass:
-
-- mixed-runtime onboarding is now ranked and compressed more intelligently, but deeper monorepos still need ownership grouping so operators understand which slice is primary vs secondary,
-- validation review is now item-by-item with keep-all / skip-all shortcuts and a starter draft summary, but larger repos still need faster bulk editing and better batching for very long suggestion lists,
-- empty-repo onboarding now supports opinionated presets plus raw stack aliases across common ecosystems, but it still needs a smaller set of curated "best default" templates for operators who do not want to think in stacks at all,
-- `init` now distinguishes starter scaffolding from trusted output and ends with a trust summary, but the next recommended refinement step should become even more contextual based on what the operator skipped or edited.
+P0 closed in this release line — see `CHANGELOG.md`.
 
 Done when:
 
@@ -66,7 +61,7 @@ Non-goals:
 
 ---
 
-## P1 — Layered specs that an operator can reason about
+## P0 — Layered specs that an operator can reason about
 
 **User outcome:** "I can share one base across packages and override only what differs, and I always know which layer owns which rule."
 
