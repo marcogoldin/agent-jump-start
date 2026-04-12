@@ -1466,6 +1466,74 @@ test("sync cleans stale files from a previous render", () => {
   }
 });
 
+test("sync repairs deleted and modified outputs in a single run", () => {
+  const tempDir = makeTempDir();
+  try {
+    const spec = makeMinimalSpec({
+      skills: [makeSkillFixture({ slug: "single-run-trust" })],
+    });
+    const specPath = writeSpec(tempDir, spec);
+    expectSuccess(runCli(["sync", "--spec", specPath, "--target", tempDir]));
+
+    rmSync(join(tempDir, "CLAUDE.md"));
+    writeFileSync(join(tempDir, ".agents/AGENTS.md"), "# manual drift\n", "utf8");
+
+    const result = runCli(["sync", "--spec", specPath, "--target", tempDir]);
+    expectSuccess(result);
+    assert.match(result.stdout, /Sync check passed/);
+    assert.ok(existsSync(join(tempDir, "CLAUDE.md")), "Deleted generated file should be restored");
+    assert.doesNotMatch(readFileSync(join(tempDir, ".agents/AGENTS.md"), "utf8"), /manual drift/);
+
+    expectSuccess(runCli(["check", "--spec", specPath, "--target", tempDir]));
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("sync repairs a skill rename in one run even with a broken symlink and stale lockfile present", () => {
+  const tempDir = makeTempDir();
+  try {
+    const specPath = writeSpec(tempDir, makeMinimalSpec({
+      skills: [makeSkillFixture({ slug: "skill-before-rename", version: "1.0.0" })],
+    }));
+
+    expectSuccess(runCli(["sync", "--spec", specPath, "--target", tempDir]));
+    assert.ok(existsSync(join(tempDir, ".agents/skills/skill-before-rename/SKILL.md")));
+
+    writeFileSync(join(tempDir, "agent-jump-start.lock.json"), `${JSON.stringify({
+      schemaVersion: 1,
+      generatedBy: "Agent Jump Start vtest",
+      skills: [{
+        slug: "skill-before-rename",
+        version: "0.9.0",
+        sourceType: "local-directory",
+        provider: "local",
+        source: "./skills/skill-before-rename",
+        checksum: "sha256:stale",
+        importedAt: "2026-04-01T00:00:00.000Z",
+      }],
+    }, null, 2)}\n`, "utf8");
+
+    mkdirSync(join(tempDir, ".claude/skills"), { recursive: true });
+    symlinkSync(join(tempDir, "does-not-exist"), join(tempDir, ".claude/skills", "broken-link"));
+
+    writeSpec(tempDir, makeMinimalSpec({
+      skills: [makeSkillFixture({ slug: "skill-after-rename", version: "2.0.0" })],
+    }));
+
+    const result = runCli(["sync", "--spec", specPath, "--target", tempDir]);
+    expectSuccess(result);
+    assert.match(result.stdout, /Cleaned stale files/);
+    assert.match(result.stdout, /Sync check passed/);
+    assert.ok(!existsSync(join(tempDir, ".agents/skills/skill-before-rename/SKILL.md")), "Old skill output should be removed");
+    assert.ok(existsSync(join(tempDir, ".agents/skills/skill-after-rename/SKILL.md")), "Renamed skill output should be created");
+
+    expectSuccess(runCli(["check", "--spec", specPath, "--target", tempDir]));
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
 test("sync defaults target to current directory", () => {
   const tempDir = makeTempDir();
   try {
@@ -1483,6 +1551,26 @@ test("sync fails when --spec is missing", () => {
   const result = runCli(["sync"]);
   expectFailure(result);
   assert.match(result.stderr, /--spec/);
+});
+
+test("sync failure output names the file, cause, and next step when convergence is impossible", () => {
+  const tempDir = makeTempDir();
+  try {
+    const specPath = writeSpec(tempDir, makeMinimalSpec());
+    expectSuccess(runCli(["sync", "--spec", specPath, "--target", tempDir]));
+
+    rmSync(join(tempDir, "CLAUDE.md"));
+    mkdirSync(join(tempDir, "CLAUDE.md"));
+
+    const result = runCli(["sync", "--spec", specPath, "--target", tempDir]);
+    expectFailure(result);
+    assert.match(result.stdout, /Sync could not converge after the automatic repair pass/);
+    assert.match(result.stdout, /FAIL CLAUDE\.md/);
+    assert.match(result.stdout, /Cause: Sync could not write a generated file/);
+    assert.match(result.stdout, /Next step:/);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
 });
 
 // ===========================================================================

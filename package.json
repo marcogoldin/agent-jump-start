@@ -15,6 +15,7 @@
     "check": "node scripts/agent-jump-start.mjs check --spec canonical-spec.yaml --target .",
     "validate": "node scripts/agent-jump-start.mjs validate --spec canonical-spec.yaml",
     "test": "node --test",
+    "smoke:p0": "node scripts/ci/smoke-single-command-trust.mjs",
     "export-schema": "node scripts/agent-jump-start.mjs export-schema",
     "list-agents": "node scripts/agent-jump-start.mjs list-agents",
     "list-profiles": "node scripts/agent-jump-start.mjs list-profiles"
