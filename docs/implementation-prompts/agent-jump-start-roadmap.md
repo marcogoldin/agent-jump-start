@@ -26,41 +26,6 @@ Every priority below removes friction from one of those four steps.
 
 ---
 
-## P0 — Bootstrap that feels like onboarding, not authoring
-
-**User outcome:** "I never start from a blank canonical spec."
-
-This is the most painful step today. `init` produces a placeholder spec the operator must rewrite by hand before the tool becomes useful. The first-run experience should propose a draft built from real repository signals, and the operator should only confirm or correct.
-
-What to build:
-
-- a single front-door command (`init` by default, no extra flag) that runs introspection + inference and produces a draft `canonical-spec.yaml` ready for review,
-- richer greenfield presets for empty repos: the operator can already choose starter stack signals, but the flow still needs opinionated templates for common starts such as React + Node API, Python service, or mixed TypeScript + Python workspaces,
-- stronger mixed-runtime ranking and ownership: onboarding now surfaces multiple repo slices, but it still needs better compression so operators see the right components without generic overlap or too many near-duplicates,
-- a review flow that already works item-by-item, then improves further with tighter inline editing, clearer summaries of accepted vs skipped items, and less prompt fatigue on larger repos,
-- onboarding copy that now distinguishes starter outputs from trusted output, then goes one step further by showing a concise post-init trust summary instead of only generic next steps,
-- a guided confirmation flow that shows each inferred section with its provenance and lets the operator accept, edit, or skip — never silently writes opinionated content,
-- inference grounded in actual repo evidence: `package.json`, `pyproject.toml`, `Makefile`, `justfile`, `.pre-commit-config.yaml`, CI workflows, `README.md`, `CONTRIBUTING.md`, ADRs,
-- a clear UI distinction between **detected**, **inferred**, and **confirmed** content while drafting; once confirmed, the canonical spec contains no machine annotations.
-
-P0 closed in this release line — see `CHANGELOG.md`.
-
-Done when:
-
-- a first-time operator on a Node.js, Python, or mixed repo gets a useful draft spec without writing a single line,
-- a first-time operator on an empty repo can choose their intended stack and get a non-generic starting spec without hand-authoring the runtime and validation model,
-- every inferred field shows its source so the operator can trust or reject it,
-- the final `canonical-spec.yaml` is fully human-readable and contains no inference metadata,
-- one `init` invocation followed by one `sync` produces a usable, repo-specific instruction set.
-
-Non-goals:
-
-- no auto-authoring without confirmation,
-- no inference promoted to "fact" without operator sign-off,
-- no embedded provenance noise in the canonical spec.
-
----
-
 ## P0 — Layered specs that an operator can reason about
 
 **User outcome:** "I can share one base across packages and override only what differs, and I always know which layer owns which rule."
@@ -88,7 +53,7 @@ Non-goal:
 
 ---
 
-## P2 — Predictable skills across every agent
+## P1 — Predictable skills across every agent
 
 **User outcome:** "A skill behaves the same way in Claude, Cursor, Copilot, and the others — or the tool tells me clearly when it cannot."
 
@@ -105,7 +70,7 @@ Done when:
 
 ---
 
-## P3 — Trust signals for teams
+## P2 — Trust signals for teams
 
 **User outcome:** "My team can adopt this without writing custom CI glue or hoping it stays stable."
 
@@ -125,7 +90,7 @@ Done when:
 
 ---
 
-## P4 — Useful beyond software
+## P3 — Useful beyond software
 
 **User outcome:** "I can use this to govern non-code work too — docs, research, support runbooks, product specs — with the same rigor."
 
