@@ -31,7 +31,8 @@ Agent Jump Start gives you a single source of truth:
 
 | If you want to... | Use this |
 |---|---|
-| Start from your current repo instead of a blank spec | `agent-jump-start init --guided --target .` |
+| Start from your current repo instead of a blank spec | `agent-jump-start init --target .` |
+| Start from an empty repo with a curated guided cold start | `agent-jump-start init --target .` |
 | Render and clean every agent output in one step | `agent-jump-start sync --spec docs/agent-jump-start/canonical-spec.yaml` |
 | Verify CI drift without writing files | `agent-jump-start check --spec docs/agent-jump-start/canonical-spec.yaml --target .` |
 | Diagnose weak placeholder content in the spec | `agent-jump-start doctor --spec docs/agent-jump-start/canonical-spec.yaml` |
@@ -43,10 +44,18 @@ For most users, this is the right flow:
 
 | Step | Command | Outcome |
 |---|---|---|
-| 1. Initialize | `agent-jump-start init --guided --target .` | Creates the framework, proposes a draft spec, and renders first outputs |
+| 1. Initialize | `agent-jump-start init --target .` | Creates the framework, proposes a draft spec, and renders first outputs |
 | 2. Review | Edit `docs/agent-jump-start/canonical-spec.yaml` | Confirm project rules, validation, review checklist, and skills |
 | 3. Sync | `agent-jump-start sync --spec docs/agent-jump-start/canonical-spec.yaml` | Re-renders, cleans stale files, and verifies drift in one command |
 | 4. Commit | `git add ... && git commit ...` | Commits the spec plus generated agent instructions |
+
+### First Run Shortcuts
+
+| Your situation | Start here | What happens |
+|---|---|---|
+| Existing Node.js / Python / mixed repo | `agent-jump-start init --target .` | Agent Jump Start inspects the repo, proposes a draft, and lets you confirm or edit it |
+| Empty repo, but you know the intended stack | `agent-jump-start init --target .` | The CLI offers curated starter presets and stack aliases so you can bootstrap a useful first draft quickly |
+| CI or scripting flow where prompts are wrong | `agent-jump-start init --non-interactive --target .` | Uses the classic non-guided placeholder bootstrap |
 
 ## Supported Agents
 
@@ -124,8 +133,11 @@ Direct `npx @marcogoldin/agent-jump-start@latest ...` may also work, but some np
 Initialize a project with one command.
 
 ```bash
-# Recommended: guided onboarding with project introspection
-agent-jump-start init --guided --target .
+# Recommended: guided onboarding is now the default
+agent-jump-start init --target .
+
+# Classic non-interactive bootstrap for CI or scripting
+agent-jump-start init --non-interactive --target .
 
 # With a built-in stack profile
 npx @marcogoldin/agent-jump-start@latest init \
@@ -157,22 +169,37 @@ If you want the simplest mental model, remember only this:
 
 | Situation | Command |
 |---|---|
-| “Set this up in a repo for the first time” | `agent-jump-start init --guided --target .` |
+| “Set this up in a repo for the first time” | `agent-jump-start init --target .` |
+| “Set this up in an empty repo and pick the stack interactively” | `agent-jump-start init --target .` |
+| “I need the old non-interactive bootstrap for CI or automation” | `agent-jump-start init --non-interactive --target .` |
 | “I edited the spec and want all agents updated” | `agent-jump-start sync --spec docs/agent-jump-start/canonical-spec.yaml` |
 | “I need CI to fail if generated files drifted” | `agent-jump-start check --spec docs/agent-jump-start/canonical-spec.yaml --target .` |
 | “The spec still looks scaffolded or weak” | `agent-jump-start doctor --spec docs/agent-jump-start/canonical-spec.yaml` |
 | “Another tool already dropped skills into local agent folders” | `agent-jump-start intake --spec docs/agent-jump-start/canonical-spec.yaml` |
 | “I want to import one explicit skill package” | `agent-jump-start import-skill --spec docs/agent-jump-start/canonical-spec.yaml --skill path/to/skill-directory` |
 
-## Guided Onboarding
+## Onboarding Experience
 
-Use `init --guided` when you want Agent Jump Start to inspect the repository and propose a starting spec interactively.
+`init` now starts the guided onboarding flow by default.
 
 ```bash
-agent-jump-start init --guided --target .
+agent-jump-start init --target .
 ```
 
-Guided onboarding scans for:
+If you need the classic placeholder flow for CI or scripting, use:
+
+```bash
+agent-jump-start init --non-interactive --target .
+```
+
+The guided flow is designed around the real first-run operator experience:
+
+1. inspect the repository,
+2. draft the canonical spec from real signals,
+3. let the operator confirm, edit, or skip suggestions,
+4. finish with one clear next step: `sync`.
+
+On existing repositories, onboarding scans for:
 
 - `package.json` dependency signals such as Express, React, Next.js, Vue, NestJS, Fastify, MUI, Tailwind, AWS SDKs
 - `package.json` scripts such as `test`, `lint`, `typecheck`, `build`
@@ -187,7 +214,13 @@ Guided onboarding scans for:
 - `CONTRIBUTING.md` development conventions
 - `Dockerfile`, `docker-compose.yml`, `.github/workflows`, `tsconfig.json`
 
-The guided flow proposes:
+On empty repositories, onboarding offers:
+
+- a curated core set of starter presets for common project types
+- support for stack aliases such as `golang`, `ruby on rails`, `.net`, `next.js`, and `react-native`
+- seeded runtime, validation, and workspace guidance so the first draft is not generic boilerplate
+
+The guided flow proposes and reviews:
 
 - project name
 - project summary
@@ -199,9 +232,13 @@ The guided flow proposes:
 - whether to keep the review checklist
 - **suggested checklist enhancements** (derived from detected validation commands)
 
-Every suggestion carries a provenance label (`detected` or `inferred`) so the operator can see where each item came from. Suggestions are shown for review and must be accepted before they become part of the canonical spec.
+Every suggestion carries a provenance label (`detected` or `inferred`) so the operator can see where each item came from. In larger repos, repeated suggestions from the same source are grouped so the operator can keep all, review in detail, or skip all without prompt fatigue.
 
-It works both in a real TTY and with piped stdin, so it can be tested or automated in CI.
+During component review, mixed and monorepo-style repos also surface **primary** and **secondary** slices to make ownership clearer before anything is written into the spec.
+
+At the end of onboarding, Agent Jump Start prints a trust summary that tells the operator what they edited, what they skipped, where to verify it in the spec, and the exact next command to run.
+
+It works both in a real TTY and with piped stdin, so it can be tested or automated.
 
 ## Workflow
 
@@ -216,7 +253,7 @@ Open `docs/agent-jump-start/canonical-spec.yaml` and fill in:
 - Review checklist
 - Skills (optional)
 
-If you used `init --guided`, many of these fields are already populated from repo evidence. If you started from a blank spec, you can use `infer` to discover validation commands, workspace rules, and checklist items from the repository:
+If you used `init`, many of these fields are already populated from repo evidence. If you started from a non-interactive placeholder spec, you can use `infer` to discover validation commands, workspace rules, and checklist items from the repository:
 
 ```bash
 # Preview what the tool can detect from the repo
@@ -560,7 +597,7 @@ agent-jump-start --version
 agent-jump-start list-agents
 agent-jump-start list-profiles
 
-agent-jump-start init [--guided] [--profile <path>] [--target <path>]
+agent-jump-start init [--profile <path>] [--target <path>] [--non-interactive]
 agent-jump-start bootstrap --base <path> [--profile <path>] [--output <path>]
 agent-jump-start sync --spec <path> [--target <path>]
 agent-jump-start infer --target <path> [--output <path>] [--section <name>] [--format json|text]
