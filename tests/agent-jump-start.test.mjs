@@ -4586,6 +4586,25 @@ test("inferSections produces Python section when Python runtime is present", () 
   assert.ok(pythonSection.rules.some((rule) => /Python version range|typed function signatures/i.test(rule.value)));
 });
 
+test("inferSections adds seeded Go rules for greenfield onboarding", () => {
+  const evidence = {
+    base: { packageManager: null, runtimes: [], signals: [], components: [] },
+    scripts: [],
+    pyprojectTools: { scripts: [], tools: [] },
+    ciSteps: [],
+    linterConfigs: [],
+    conventions: [],
+    preCommitHooks: [],
+    makeTargets: [],
+  };
+
+  const result = inferSections(evidence, { seededStacks: ["go"] });
+  const goSection = result.find((s) => s.title === "Go rules");
+
+  assert.ok(goSection, "Expected Go rules section");
+  assert.ok(goSection.rules.some((rule) => /Return explicit errors|Keep packages small/i.test(rule.value)));
+});
+
 test("inferChecklist produces items from detected validation commands", () => {
   const evidence = {
     base: { packageManager: "npm", runtimes: ["Node.js"], signals: [], components: [] },
@@ -4876,6 +4895,67 @@ test("init --guided supports greenfield stack choices and produces non-generic s
     assert.ok(spec.workspaceInstructions.sections.some((section) => section.title === "TypeScript rules"));
     assert.ok(spec.workspaceInstructions.sections.some((section) => section.title === "Python rules"));
     assert.doesNotMatch(result.stdout, /Built-in profiles are starter references/);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("init --guided supports opinionated starter presets beyond Node and Python", () => {
+  const tempDir = makeTempDir();
+  try {
+    const stdinInput = "go-service\nGreenfield Go Service\nA Go backend service\ny\ny\ny\nn\n";
+
+    const result = spawnSync(process.execPath, [
+      scriptPath, "init", "--guided", "--target", tempDir,
+    ], {
+      encoding: "utf8",
+      input: stdinInput,
+    });
+
+    assert.equal(result.status, 0,
+      `Expected success.\nSTDOUT:\n${result.stdout}\nSTDERR:\n${result.stderr}`);
+
+    const specPath = join(tempDir, "docs/agent-jump-start/canonical-spec.yaml");
+    const spec = JSON.parse(readFileSync(specPath, "utf8"));
+
+    assert.match(spec.project.name, /Greenfield Go Service/);
+    assert.match(spec.project.summary, /A Go backend service/);
+    assert.ok(spec.project.components.includes("api: Go service"));
+    assert.ok(spec.workspaceInstructions.validation.includes("go test ./..."));
+    assert.ok(spec.workspaceInstructions.sections.some((section) => section.title === "Go rules"));
+    assert.match(result.stdout, /Starter draft summary/);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("init --guided normalizes raw stack aliases and seeds non-preset ecosystems", () => {
+  const tempDir = makeTempDir();
+  try {
+    const stdinInput = "golang, ruby on rails\nCross Stack Workspace\nA mixed service workspace\na\ny\na\na\nn\n";
+
+    const result = spawnSync(process.execPath, [
+      scriptPath, "init", "--guided", "--target", tempDir,
+    ], {
+      encoding: "utf8",
+      input: stdinInput,
+    });
+
+    assert.equal(result.status, 0,
+      `Expected success.\nSTDOUT:\n${result.stdout}\nSTDERR:\n${result.stderr}`);
+
+    const specPath = join(tempDir, "docs/agent-jump-start/canonical-spec.yaml");
+    const spec = JSON.parse(readFileSync(specPath, "utf8"));
+
+    assert.match(spec.project.name, /Cross Stack Workspace/);
+    assert.ok(spec.project.components.includes("api: Go service"));
+    assert.ok(spec.project.components.includes("web: Rails application"));
+    assert.ok(spec.workspaceInstructions.validation.includes("go test ./..."));
+    assert.ok(spec.workspaceInstructions.validation.includes("bundle exec rspec"));
+    assert.ok(spec.workspaceInstructions.sections.some((section) => section.title === "Go rules"));
+    assert.ok(spec.workspaceInstructions.sections.some((section) => section.title === "Ruby rules"));
+    assert.match(result.stdout, /Starter presets:/);
+    assert.match(result.stdout, /raw stacks like typescript, python, go, rails, dotnet, react-native/i);
   } finally {
     cleanupTempDir(tempDir);
   }
