@@ -11,6 +11,30 @@ so versions are documented only where the history provides clear evidence.
 
 ## [Unreleased]
 
+## [1.14.0] - 2026-04-12
+
+### Added
+
+- Made guided onboarding the default `init` experience so a first-time operator can bootstrap a useful draft spec without starting from a blank template.
+- Added a curated greenfield preset tier for common starts including full-stack web, Next.js, FastAPI, Rails, and Flutter.
+- Added broader cold-start stack normalization so operators can type human aliases such as `golang`, `ruby on rails`, `.net`, and `next.js` and still receive useful starter scaffolding.
+- Added ownership-aware onboarding for detected components so mixed or monorepo-style projects surface primary and secondary slices more clearly during review.
+- Added contextual trust summaries after guided setup that call out what the operator edited, what was skipped, and the exact next command to run.
+
+### Changed
+
+- Changed `init` so guided onboarding is now the default front door, while `--non-interactive` preserves the classic CI-friendly placeholder flow.
+- Reworked suggestion review to scale better on larger repositories with grouped keep-all / review / skip-all decisions for repeated sources such as `package.json` scripts.
+- Tightened greenfield onboarding copy so operators see a small curated path first instead of an undifferentiated list of every preset.
+- Sharpened first-run trust messaging so the CLI distinguishes starter scaffolding from trusted, repo-specific memory more clearly.
+- Closed the roadmap P0 bootstrap milestone and promoted layered specs to the next top priority.
+
+### Fixed
+
+- Fixed onboarding friction in empty repositories by seeding runtime, validation, and workspace-rule drafts from curated presets and normalized stack choices instead of leaving operators with low-value placeholders.
+- Fixed mixed-runtime suggestion ranking so component review is less noisy and more useful when multiple slices are detected in one workspace.
+- Fixed bulk review grouping so repeated validation commands from `package.json` scripts are treated as one operator decision instead of a long sequence of near-identical prompts.
+
 ## [1.13.1] - 2026-04-12
 
 ### Added
@@ -132,7 +156,8 @@ so versions are documented only where the history provides clear evidence.
 
 - Migrated the project license from MIT to MPL-2.0 during the initial public setup period.
 
-[Unreleased]: https://github.com/marcogoldin/agent-jump-start/compare/v1.13.1...HEAD
+[Unreleased]: https://github.com/marcogoldin/agent-jump-start/compare/v1.14.0...HEAD
+[1.14.0]: https://github.com/marcogoldin/agent-jump-start/compare/v1.13.1...v1.14.0
 [1.13.1]: https://github.com/marcogoldin/agent-jump-start/compare/v1.13.0...v1.13.1
 [1.13.0]: https://github.com/marcogoldin/agent-jump-start/compare/v1.12.0...v1.13.0
 [1.12.0]: https://github.com/marcogoldin/agent-jump-start/compare/v1.11.1...v1.12.0

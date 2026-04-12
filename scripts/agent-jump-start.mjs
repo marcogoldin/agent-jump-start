@@ -36,7 +36,7 @@ function usage() {
   console.log(`Agent Jump Start v${TOOL_VERSION}
 
 Commands:
-  init           [--guided] [--profile <path>] [--target <path>]
+  init           [--profile <path>] [--target <path>] [--non-interactive]
   bootstrap      --base <path> [--profile <path>] [--output <path>]
   sync           --spec <path> [--target <path>]
   infer          --target <path> [--output <path>] [--section <name>] [--format json|text]
@@ -58,10 +58,14 @@ Commands:
 Options:
   --help      Show this help message
   --version   Show version number
+  --non-interactive  Use the classic non-guided init flow for CI or scripting
 
 Examples:
   npx @marcogoldin/agent-jump-start@latest init \\
     --profile specs/profiles/react-vite-mui.profile.yaml
+
+  node scripts/agent-jump-start.mjs init \\
+    --non-interactive
 
   node scripts/agent-jump-start.mjs bootstrap \\
     --base specs/base-spec.yaml \\

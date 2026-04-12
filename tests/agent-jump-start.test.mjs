@@ -10,6 +10,7 @@ import { mergeByKey, mergeSpecLayers, resolveLayeredSpec, resolveLayeredSpecWith
 import { validateSpec } from "../lib/validation.mjs";
 import { discoverUnmanagedSkills } from "../lib/intake.mjs";
 import { findSkillCandidates } from "../lib/skills.mjs";
+import { reviewSuggestedEntries } from "../lib/interactive.mjs";
 
 const scriptPath = resolve("scripts/agent-jump-start.mjs");
 
@@ -3132,6 +3133,31 @@ test("introspection detects mixed Node.js + Python project", () => {
   }
 });
 
+test("introspection detects Python dependencies from pyproject.toml and directory hints", () => {
+  const tempDir = makeTempDir();
+  try {
+    writeFileSync(join(tempDir, "pyproject.toml"), `
+[project]
+name = "python-mixed"
+dependencies = ["fastapi>=0.115", "ruff>=0.6.9"]
+`, "utf8");
+    mkdirSync(join(tempDir, "src", "api"), { recursive: true });
+    mkdirSync(join(tempDir, "worker"), { recursive: true });
+
+    const result = introspectProject(tempDir);
+
+    assert.ok(result.runtimes.includes("Python"));
+    assert.ok(result.components.some((c) => c.type === "api" && /FastAPI/.test(c.detail)),
+      "Should detect FastAPI component from pyproject.toml dependencies");
+    assert.ok(result.components.some((c) => c.type === "worker" && /worker/i.test(c.detail)),
+      "Should detect worker component from directory structure");
+    assert.ok(!result.components.some((c) => c.type === "api" && c.detail === "Python API service"),
+      "Should not keep generic API component when a specific framework component exists");
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
 test("introspection detects Docker and lock file signals", () => {
   const tempDir = makeTempDir();
   try {
@@ -3164,14 +3190,34 @@ test("introspection falls back to directory name when no manifest has a project 
 
 test("formatDetectedComponents produces spec-ready strings", () => {
   const components = [
-    { type: "api", detail: "Express.js REST service", source: "package.json" },
-    { type: "retrieval", detail: "Milvus vector search (pymilvus)", source: "requirements.txt" },
+    { type: "api", detail: "Express.js REST service", source: "package.json", ownership: "primary" },
+    { type: "retrieval", detail: "Milvus vector search (pymilvus)", source: "requirements.txt", ownership: "secondary" },
   ];
   const formatted = formatDetectedComponents(components);
   assert.deepEqual(formatted, [
     "api: Express.js REST service",
     "retrieval: Milvus vector search (pymilvus)",
   ]);
+});
+
+test("introspection annotates ownership and orders primary components before secondary ones", () => {
+  const tempDir = makeTempDir();
+  try {
+    writeFileSync(join(tempDir, "package.json"), JSON.stringify({
+      name: "workspace-app",
+      dependencies: { react: "^18.0.0" },
+    }), "utf8");
+    mkdirSync(join(tempDir, "apps", "web"), { recursive: true });
+    mkdirSync(join(tempDir, "packages", "utils"), { recursive: true });
+    mkdirSync(join(tempDir, "packages", "api"), { recursive: true });
+
+    const result = introspectProject(tempDir);
+    assert.equal(result.components[0].ownership, "primary");
+    assert.match(`${result.components[0].type}: ${result.components[0].detail}`, /React application/);
+    assert.ok(result.components.some((component) => component.source === "packages/api" && component.ownership === "secondary"));
+  } finally {
+    cleanupTempDir(tempDir);
+  }
 });
 
 test("suggestPackageManagerRule returns correct rule for npm", () => {
@@ -3194,8 +3240,8 @@ test("init --guided produces valid spec and passes check when stdin is piped", (
       dependencies: { express: "^4.18.0" },
     }), "utf8");
 
-    // Pipe answers: project name (accept default), summary, accept components, include checklist, no skills
-    const stdinInput = "\nA test application\ny\ny\nn\n";
+    // Pipe answers: project name (accept default), summary, keep detected component, include checklist
+    const stdinInput = "\nA test application\ny\ny\n";
 
     const result = spawnSync(process.execPath, [
       scriptPath, "init", "--guided", "--target", tempDir,
@@ -3216,6 +3262,7 @@ test("init --guided produces valid spec and passes check when stdin is piped", (
     assert.equal(spec.project.summary, "A test application");
     assert.ok(spec.project.components.some((c) => /Express/.test(c)),
       "Should include detected Express component");
+    assert.doesNotMatch(result.stdout, /Built-in profiles are starter references/);
 
     // Verify check passes
     const checkResult = spawnSync(process.execPath, [
@@ -3234,7 +3281,7 @@ test("init --guided copies introspection and interactive modules to target", () 
   try {
     writeFileSync(join(tempDir, "package.json"), JSON.stringify({ name: "copy-test" }), "utf8");
 
-    const stdinInput = "\nTest summary\nn\ny\nn\n";
+    const stdinInput = "\nTest summary\n\ny\n";
 
     const result = spawnSync(process.execPath, [
       scriptPath, "init", "--guided", "--target", tempDir,
@@ -3247,6 +3294,52 @@ test("init --guided copies introspection and interactive modules to target", () 
       "introspection.mjs should be copied");
     assert.ok(existsSync(join(tempDir, "docs/agent-jump-start/lib/interactive.mjs")),
       "interactive.mjs should be copied");
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("init defaults to guided onboarding and core presets produce a non-generic draft", () => {
+  const tempDir = makeTempDir();
+  try {
+    const stdinInput = "fullstack-web\nnpm\n\nA default guided workspace\na\na\na\ny\na\n";
+    const result = spawnSync(process.execPath, [
+      scriptPath, "init", "--target", tempDir,
+    ], {
+      encoding: "utf8",
+      input: stdinInput,
+    });
+
+    assert.equal(result.status, 0,
+      `Expected success.\nSTDOUT:\n${result.stdout}\nSTDERR:\n${result.stderr}`);
+
+    const specPath = join(tempDir, "docs/agent-jump-start/canonical-spec.yaml");
+    const spec = JSON.parse(readFileSync(specPath, "utf8"));
+
+    assert.match(spec.workspaceInstructions.packageManagerRule, /Use npm/);
+    assert.match(spec.workspaceInstructions.runtimeRule, /Node\.js/);
+    assert.ok(spec.workspaceInstructions.validation.length >= 1);
+    assert.ok(spec.project.components.includes("web: React application"));
+    assert.ok(spec.project.components.includes("api: Express.js REST service"));
+    assert.match(result.stdout, /Core starter presets:/);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("init --non-interactive preserves the classic placeholder flow", () => {
+  const tempDir = makeTempDir();
+  try {
+    const result = runCli(["init", "--non-interactive", "--target", tempDir]);
+    expectSuccess(result);
+
+    const specPath = join(tempDir, "docs/agent-jump-start/canonical-spec.yaml");
+    const spec = JSON.parse(readFileSync(specPath, "utf8"));
+
+    assert.equal(spec.project.name, "Replace this project name");
+    assert.match(result.stdout, /Available profiles/);
+    assert.match(result.stdout, /Edit docs\/agent-jump-start\/canonical-spec\.yaml/);
+    assert.doesNotMatch(result.stdout, /Trust check:/);
   } finally {
     cleanupTempDir(tempDir);
   }
@@ -4415,6 +4508,27 @@ test("inferValidation deduplicates commands across sources", () => {
   assert.equal(testEntries[0].provenance, "detected", "package.json (priority 1) should win over CI");
 });
 
+test("inferValidation deduplicates npm test and npm run test aliases", () => {
+  const evidence = {
+    base: { packageManager: "npm", runtimes: ["Node.js"], signals: [], components: [] },
+    scripts: [
+      { command: "npm run test", source: "package.json scripts.test", raw: "vitest" },
+    ],
+    pyprojectTools: { scripts: [], tools: [] },
+    ciSteps: [
+      { command: "npm test", source: ".github/workflows/ci.yml", workflow: "ci.yml" },
+    ],
+    linterConfigs: [],
+    conventions: [],
+    preCommitHooks: [],
+    makeTargets: [],
+  };
+
+  const result = inferValidation(evidence);
+  assert.equal(result.filter((v) => /test/i.test(v.value)).length, 1);
+  assert.equal(result[0].value, "npm run test");
+});
+
 test("inferValidation maps pre-commit hooks to known commands", () => {
   const evidence = {
     base: { packageManager: null, runtimes: ["Python"], signals: [], components: [] },
@@ -4518,6 +4632,44 @@ test("inferSections returns empty for empty evidence", () => {
   const result = inferSections(evidence);
 
   assert.equal(result.length, 0, "No sections for empty evidence");
+});
+
+test("inferSections produces Python section when Python runtime is present", () => {
+  const evidence = {
+    base: { packageManager: null, runtimes: ["Python"], signals: [], components: [] },
+    scripts: [],
+    pyprojectTools: { scripts: [], tools: [{ tool: "ruff", file: "pyproject.toml" }] },
+    ciSteps: [],
+    linterConfigs: [],
+    conventions: [],
+    preCommitHooks: [],
+    makeTargets: [],
+  };
+
+  const result = inferSections(evidence);
+  const pythonSection = result.find((s) => s.title === "Python rules");
+
+  assert.ok(pythonSection, "Expected Python rules section");
+  assert.ok(pythonSection.rules.some((rule) => /Python version range|typed function signatures/i.test(rule.value)));
+});
+
+test("inferSections adds seeded Go rules for greenfield onboarding", () => {
+  const evidence = {
+    base: { packageManager: null, runtimes: [], signals: [], components: [] },
+    scripts: [],
+    pyprojectTools: { scripts: [], tools: [] },
+    ciSteps: [],
+    linterConfigs: [],
+    conventions: [],
+    preCommitHooks: [],
+    makeTargets: [],
+  };
+
+  const result = inferSections(evidence, { seededStacks: ["go"] });
+  const goSection = result.find((s) => s.title === "Go rules");
+
+  assert.ok(goSection, "Expected Go rules section");
+  assert.ok(goSection.rules.some((rule) => /Return explicit errors|Keep packages small/i.test(rule.value)));
 });
 
 test("inferChecklist produces items from detected validation commands", () => {
@@ -4725,18 +4877,8 @@ test("init --guided with scripts proposes validation commands in interactive flo
       dependencies: { express: "^4.18.0" },
     }), "utf8");
 
-    // Pipe answers: name, summary, components, accept validation, accept sections (if any),
-    // include checklist, accept checklist suggestions (if any), no skills
-    // The exact number depends on which inference steps have content.
-    // For a project with test+lint scripts and express dependency:
-    // 1. project name (accept default)
-    // 2. summary
-    // 3. accept components (y)
-    // 4. accept validation (y)
-    // 5. include checklist (y)
-    // 6. accept checklist suggestions (y)
-    // 7. import skills (n)
-    const stdinInput = "\nA guided test app\ny\ny\ny\ny\nn\n";
+    // name, summary, keep component, keep test, keep lint, include checklist, keep checklist items
+    const stdinInput = "\nA guided test app\ny\ny\ny\ny\ny\ny\n";
 
     const result = spawnSync(process.execPath, [
       scriptPath, "init", "--guided", "--target", tempDir,
@@ -4756,6 +4898,195 @@ test("init --guided with scripts proposes validation commands in interactive flo
     assert.ok(Array.isArray(spec.workspaceInstructions.validation));
     assert.ok(spec.workspaceInstructions.validation.some((v) => /npm run test/.test(v)),
       `Validation should contain detected commands, got: ${JSON.stringify(spec.workspaceInstructions.validation)}`);
+    assert.ok(spec.workspaceInstructions.validation.some((v) => /npm run lint/.test(v)),
+      `Validation should contain detected commands, got: ${JSON.stringify(spec.workspaceInstructions.validation)}`);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("init --guided lets the operator keep and skip validation commands item by item", () => {
+  const tempDir = makeTempDir();
+  try {
+    writeFileSync(join(tempDir, "package.json"), JSON.stringify({
+      name: "guided-review-test",
+      scripts: { test: "vitest", lint: "eslint ." },
+      dependencies: { express: "^4.18.0" },
+    }), "utf8");
+
+    const stdinInput = "\nReview-friendly app\ny\ny\nn\ny\ny\nn\n";
+
+    const result = spawnSync(process.execPath, [
+      scriptPath, "init", "--guided", "--target", tempDir,
+    ], {
+      encoding: "utf8",
+      input: stdinInput,
+    });
+
+    assert.equal(result.status, 0,
+      `Expected success.\nSTDOUT:\n${result.stdout}\nSTDERR:\n${result.stderr}`);
+
+    const specPath = join(tempDir, "docs/agent-jump-start/canonical-spec.yaml");
+    const spec = JSON.parse(readFileSync(specPath, "utf8"));
+
+    assert.ok(spec.workspaceInstructions.validation.includes("npm run test"));
+    assert.ok(!spec.workspaceInstructions.validation.includes("npm run lint"));
+    assert.doesNotMatch(result.stderr, /Accept 2 suggested validation command/);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("reviewSuggestedEntries returns accepted items and detailed bulk stats", async () => {
+  const answers = ["y", "r", "e", "custom second", "n"];
+  const prompt = {
+    choose: async () => answers.shift(),
+    ask: async () => answers.shift(),
+  };
+  const items = [
+    { value: "npm test", source: "package.json scripts.test" },
+    { value: "npm run lint", source: "package.json scripts.lint" },
+    { value: "go test ./...", source: "Makefile target.test" },
+    { value: "ruff check .", source: "Makefile target.lint" },
+    { value: "pytest", source: "Makefile target.pytest" },
+    { value: "mypy .", source: "Makefile target.typecheck" },
+  ];
+
+  const result = await reviewSuggestedEntries(prompt, "Suggested validation commands", items, {
+    kind: "validation command",
+    initialValue: (item) => item.value,
+    applyEditedValue: (item, value) => ({ ...item, value }),
+  });
+
+  assert.deepEqual(result.accepted.map((item) => item.value), [
+    "npm test",
+    "npm run lint",
+    "custom second",
+  ]);
+  assert.equal(result.stats.kept, 2);
+  assert.equal(result.stats.edited, 1);
+  assert.equal(result.stats.skipped, 3);
+  assert.equal(result.stats.bulkKept, 2);
+  assert.equal(result.stats.bulkSkipped, 0);
+  assert.equal(result.stats.bySource["package.json scripts"].bulkKept, 2);
+  assert.equal(result.stats.bySource.Makefile.edited, 1);
+  assert.equal(result.stats.bySource.Makefile.skipped, 3);
+});
+
+test("init --guided supports greenfield stack choices and produces non-generic starter spec", () => {
+  const tempDir = makeTempDir();
+  try {
+    const stdinInput = "typescript, python\nnpm\nGreenfield Workspace\nA new product repo\ny\ny\ny\ny\ny\ny\ny\nn\n";
+
+    const result = spawnSync(process.execPath, [
+      scriptPath, "init", "--guided", "--target", tempDir,
+    ], {
+      encoding: "utf8",
+      input: stdinInput,
+    });
+
+    assert.equal(result.status, 0,
+      `Expected success.\nSTDOUT:\n${result.stdout}\nSTDERR:\n${result.stderr}`);
+
+    const specPath = join(tempDir, "docs/agent-jump-start/canonical-spec.yaml");
+    const spec = JSON.parse(readFileSync(specPath, "utf8"));
+
+    assert.match(spec.workspaceInstructions.packageManagerRule, /Use npm/);
+    assert.match(spec.workspaceInstructions.runtimeRule, /Node\.js and Python/);
+    assert.ok(spec.workspaceInstructions.validation.includes("npm run test"));
+    assert.ok(spec.workspaceInstructions.validation.includes("python -m pytest"));
+    assert.ok(spec.workspaceInstructions.sections.some((section) => section.title === "TypeScript rules"));
+    assert.ok(spec.workspaceInstructions.sections.some((section) => section.title === "Python rules"));
+    assert.doesNotMatch(result.stdout, /Built-in profiles are starter references/);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("init --guided supports opinionated starter presets beyond Node and Python", () => {
+  const tempDir = makeTempDir();
+  try {
+    const stdinInput = "go-service\nGreenfield Go Service\nA Go backend service\ny\ny\ny\nn\n";
+
+    const result = spawnSync(process.execPath, [
+      scriptPath, "init", "--guided", "--target", tempDir,
+    ], {
+      encoding: "utf8",
+      input: stdinInput,
+    });
+
+    assert.equal(result.status, 0,
+      `Expected success.\nSTDOUT:\n${result.stdout}\nSTDERR:\n${result.stderr}`);
+
+    const specPath = join(tempDir, "docs/agent-jump-start/canonical-spec.yaml");
+    const spec = JSON.parse(readFileSync(specPath, "utf8"));
+
+    assert.match(spec.project.name, /Greenfield Go Service/);
+    assert.match(spec.project.summary, /A Go backend service/);
+    assert.ok(spec.project.components.includes("api: Go service"));
+    assert.ok(spec.workspaceInstructions.validation.includes("go test ./..."));
+    assert.ok(spec.workspaceInstructions.sections.some((section) => section.title === "Go rules"));
+    assert.match(result.stdout, /Starter draft summary/);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("init --guided normalizes raw stack aliases and seeds non-preset ecosystems", () => {
+  const tempDir = makeTempDir();
+  try {
+    const stdinInput = "golang, ruby on rails\nCross Stack Workspace\nA mixed service workspace\na\ny\na\na\nn\n";
+
+    const result = spawnSync(process.execPath, [
+      scriptPath, "init", "--guided", "--target", tempDir,
+    ], {
+      encoding: "utf8",
+      input: stdinInput,
+    });
+
+    assert.equal(result.status, 0,
+      `Expected success.\nSTDOUT:\n${result.stdout}\nSTDERR:\n${result.stderr}`);
+
+    const specPath = join(tempDir, "docs/agent-jump-start/canonical-spec.yaml");
+    const spec = JSON.parse(readFileSync(specPath, "utf8"));
+
+    assert.match(spec.project.name, /Cross Stack Workspace/);
+    assert.ok(spec.project.components.includes("api: Go service"));
+    assert.ok(spec.project.components.includes("web: Rails application"));
+    assert.ok(spec.workspaceInstructions.validation.includes("go test ./..."));
+    assert.ok(spec.workspaceInstructions.validation.includes("bundle exec rspec"));
+    assert.ok(spec.workspaceInstructions.sections.some((section) => section.title === "Go rules"));
+    assert.ok(spec.workspaceInstructions.sections.some((section) => section.title === "Ruby rules"));
+    assert.match(result.stdout, /Core starter presets:/);
+    assert.match(result.stdout, /raw stacks like typescript, python, go, rails, dotnet, react-native/i);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("guided init trust summary names edited categories and skipped checklist", () => {
+  const tempDir = makeTempDir();
+  try {
+    writeFileSync(join(tempDir, "package.json"), JSON.stringify({
+      name: "summary-app",
+      scripts: { test: "vitest", lint: "eslint ." },
+    }), "utf8");
+
+    const stdinInput = "\nSummary app\ny\ne\nnpm run test:ci\ny\nn\n";
+    const result = spawnSync(process.execPath, [
+      scriptPath, "init", "--target", tempDir,
+    ], {
+      encoding: "utf8",
+      input: stdinInput,
+    });
+
+    assert.equal(result.status, 0,
+      `Expected success.\nSTDOUT:\n${result.stdout}\nSTDERR:\n${result.stderr}`);
+    assert.match(result.stdout, /edited: validation commands/i);
+    assert.match(result.stdout, /skipped: review checklist/i);
+    assert.match(result.stdout, /You edited validation commands; verify workspaceInstructions\.validation/i);
+    assert.match(result.stdout, /You skipped review checklist; re-run init or edit reviewChecklist/i);
+    assert.match(result.stdout, /Next command: node docs\/agent-jump-start\/scripts\/agent-jump-start\.mjs sync --spec docs\/agent-jump-start\/canonical-spec\.yaml/);
   } finally {
     cleanupTempDir(tempDir);
   }
