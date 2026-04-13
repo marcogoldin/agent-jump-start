@@ -36,7 +36,7 @@ function usage() {
   console.log(`Agent Jump Start v${TOOL_VERSION}
 
 Commands:
-  init           [--profile <path>] [--target <path>] [--non-interactive]
+  init           [--profile <path>] [--target <path>] [--non-interactive] [--overwrite]
   bootstrap      --base <path> [--profile <path>] [--output <path>]
   sync           --spec <path> [--target <path>]
   infer          --target <path> [--output <path>] [--section <name>] [--format json|text]
@@ -59,6 +59,7 @@ Options:
   --help      Show this help message
   --version   Show version number
   --non-interactive  Use the classic non-guided init flow for CI or scripting
+  --overwrite        Replace an existing canonical spec without prompting
 
 Examples:
   npx @marcogoldin/agent-jump-start@latest init \\

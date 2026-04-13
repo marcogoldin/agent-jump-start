@@ -129,10 +129,10 @@ test("render generates standards-aligned SKILL.md mirrors for native skill clien
   }
 });
 
-test("init followed by check passes without an extra render", () => {
+test("init --non-interactive followed by check passes without an extra render", () => {
   const tempDir = makeTempDir();
   try {
-    expectSuccess(runCli(["init", "--target", tempDir]));
+    expectSuccess(runCli(["init", "--non-interactive", "--target", tempDir]));
     const specPath = join(tempDir, "docs/agent-jump-start/canonical-spec.yaml");
     const checkScript = join(tempDir, "docs/agent-jump-start/scripts/agent-jump-start.mjs");
     const checkResult = spawnSync(process.execPath, [checkScript, "check", "--spec", specPath, "--target", tempDir], { encoding: "utf8" });
@@ -142,10 +142,10 @@ test("init followed by check passes without an extra render", () => {
   }
 });
 
-test("init with profile followed by check passes without an extra render", () => {
+test("init --non-interactive with profile followed by check passes without an extra render", () => {
   const tempDir = makeTempDir();
   try {
-    expectSuccess(runCli(["init", "--profile", "specs/profiles/react-vite-mui.profile.yaml", "--target", tempDir]));
+    expectSuccess(runCli(["init", "--non-interactive", "--profile", "specs/profiles/react-vite-mui.profile.yaml", "--target", tempDir]));
     const specPath = join(tempDir, "docs/agent-jump-start/canonical-spec.yaml");
     const checkScript = join(tempDir, "docs/agent-jump-start/scripts/agent-jump-start.mjs");
     const checkResult = spawnSync(process.execPath, [checkScript, "check", "--spec", specPath, "--target", tempDir], { encoding: "utf8" });
@@ -155,10 +155,10 @@ test("init with profile followed by check passes without an extra render", () =>
   }
 });
 
-test("init copies lib/ modules for modular imports", () => {
+test("init --non-interactive copies lib/ modules for modular imports", () => {
   const tempDir = makeTempDir();
   try {
-    expectSuccess(runCli(["init", "--target", tempDir]));
+    expectSuccess(runCli(["init", "--non-interactive", "--target", tempDir]));
     const ajsDir = join(tempDir, "docs/agent-jump-start");
     assert.ok(existsSync(join(ajsDir, "lib/constants.mjs")), "lib/constants.mjs should exist");
     assert.ok(existsSync(join(ajsDir, "lib/utils.mjs")), "lib/utils.mjs should exist");
@@ -3220,6 +3220,173 @@ test("introspection annotates ownership and orders primary components before sec
   }
 });
 
+test("introspection detects .NET project from .csproj", () => {
+  const tempDir = makeTempDir();
+  try {
+    writeFileSync(join(tempDir, "MyApp.csproj"), "<Project Sdk=\"Microsoft.NET.Sdk.Web\" />", "utf8");
+    mkdirSync(join(tempDir, "Controllers"), { recursive: true });
+    const result = introspectProject(tempDir);
+    assert.ok(result.runtimes.includes(".NET"), "Should detect .NET runtime");
+    assert.equal(result.packageManager, "dotnet");
+    assert.ok(result.signals.some((s) => s.file === "MyApp.csproj"));
+    assert.ok(result.components.some((c) => /\.NET service/.test(c.detail)));
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("introspection detects Rust, Go, Ruby, PHP, Dart/Flutter projects", () => {
+  for (const [manifest, content, runtime, expectedManager] of [
+    ["Cargo.toml", "[package]\nname=\"x\"\n", "Rust", "cargo"],
+    ["go.mod", "module x\n", "Go", "go"],
+    ["Gemfile", "source 'https://rubygems.org'\n", "Ruby", "bundler"],
+    ["composer.json", "{\"name\":\"acme/x\"}", "PHP", "composer"],
+    ["pubspec.yaml", "name: x\nflutter:\n  sdk: flutter\n", "Dart", "pub"],
+    ["pom.xml", "<project/>", "Java", "maven"],
+  ]) {
+    const tempDir = makeTempDir();
+    try {
+      writeFileSync(join(tempDir, manifest), content, "utf8");
+      const result = introspectProject(tempDir);
+      assert.ok(result.runtimes.includes(runtime), `Should detect ${runtime} from ${manifest}`);
+      assert.equal(result.packageManager, expectedManager, `Should pick ${expectedManager} for ${manifest}`);
+      assert.ok(result.signals.some((s) => s.file === manifest));
+    } finally {
+      cleanupTempDir(tempDir);
+    }
+  }
+});
+
+test("baselineValidationForRuntimes seeds a command per detected runtime", async () => {
+  const { baselineValidationForRuntimes } = await import("../lib/introspection.mjs");
+  assert.ok(baselineValidationForRuntimes([".NET"], "dotnet").includes("dotnet test"));
+  assert.ok(baselineValidationForRuntimes(["Rust"], "cargo").includes("cargo test"));
+  assert.ok(baselineValidationForRuntimes(["Go"], "go").includes("go test ./..."));
+  assert.ok(baselineValidationForRuntimes(["Java"], "gradle").includes("./gradlew test"));
+  assert.ok(baselineValidationForRuntimes(["Java"], "maven").includes("./mvnw test"));
+  assert.ok(baselineValidationForRuntimes(["Ruby"], "bundler").includes("bundle exec rspec"));
+  assert.ok(baselineValidationForRuntimes(["PHP"], "composer").includes("composer test"));
+  assert.ok(baselineValidationForRuntimes(["Dart"], "pub").includes("flutter test"));
+});
+
+test("suggestPackageManagerRule covers non-Node ecosystems", () => {
+  assert.match(suggestPackageManagerRule("dotnet"), /\.NET SDK/);
+  assert.match(suggestPackageManagerRule("cargo"), /Cargo/);
+  assert.match(suggestPackageManagerRule("go"), /Go modules/);
+  assert.match(suggestPackageManagerRule("maven"), /Maven/);
+  assert.match(suggestPackageManagerRule("bundler"), /Bundler/);
+  assert.match(suggestPackageManagerRule("composer"), /Composer/);
+  assert.match(suggestPackageManagerRule("pub"), /Pub/);
+});
+
+test("init --guided on .NET skeleton produces non-generic draft without typing a stack", () => {
+  const tempDir = makeTempDir();
+  try {
+    writeFileSync(join(tempDir, "MyApp.csproj"), "<Project Sdk=\"Microsoft.NET.Sdk.Web\" />", "utf8");
+    mkdirSync(join(tempDir, "Controllers"), { recursive: true });
+    // Stdin: project name default, summary, keep components, skip-all validation/sections, no checklist, confirm
+    const stdinInput = "\nA .NET 8 web API service\na\na\nn\ny\n";
+    const result = spawnSync(process.execPath, [
+      scriptPath, "init", "--guided", "--target", tempDir,
+    ], { encoding: "utf8", input: stdinInput });
+
+    assert.equal(result.status, 0,
+      `Expected success.\nSTDOUT:\n${result.stdout}\nSTDERR:\n${result.stderr}`);
+
+    const specPath = join(tempDir, "docs/agent-jump-start/canonical-spec.yaml");
+    const spec = JSON.parse(readFileSync(specPath, "utf8"));
+    assert.match(spec.project.summary, /\.NET/);
+    assert.match(spec.workspaceInstructions.runtimeRule, /\.NET/);
+    assert.match(spec.workspaceInstructions.packageManagerRule, /\.NET SDK/);
+    assert.notEqual(spec.project.summary, "y", "Summary must not hold the 'y' cascade-shift value");
+    assert.ok(!spec.project.components.includes("y"), "Components must not hold the 'y' cascade-shift value");
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("init --guided rejects unknown stack tokens and keeps re-asking until a valid answer arrives", () => {
+  const tempDir = makeTempDir();
+  try {
+    const stdinInput = "MyApp\nMyProject\nMyThing\nfullstack-web\nnpm\n\nA valid workspace\na\na\na\nn\ny\n";
+    const result = spawnSync(process.execPath, [
+      scriptPath, "init", "--guided", "--target", tempDir,
+    ], { encoding: "utf8", input: stdinInput });
+
+    assert.equal(result.status, 0,
+      `Expected success.\nSTDOUT:\n${result.stdout}\nSTDERR:\n${result.stderr}`);
+    assert.match(result.stdout, /Unknown stack\/preset/);
+    assert.doesNotMatch(result.stdout, /Too many invalid entries/);
+    const specPath = join(tempDir, "docs/agent-jump-start/canonical-spec.yaml");
+    const spec = JSON.parse(readFileSync(specPath, "utf8"));
+    assert.notEqual(spec.project.name, "MyApp");
+    assert.notEqual(spec.project.summary, "y");
+    assert.ok(!spec.project.components.includes("y"));
+    assert.ok(spec.project.components.includes("web: React application"));
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("init --guided fails without writing a spec when stack selection never becomes explicit", () => {
+  const tempDir = makeTempDir();
+  try {
+    const result = spawnSync(process.execPath, [
+      scriptPath, "init", "--guided", "--target", tempDir,
+    ], { encoding: "utf8", input: "MyApp\nMyProject\nMyThing\n" });
+
+    expectFailure(result);
+    assert.match(result.stderr, /Starter selection was not completed/);
+    assert.ok(!existsSync(join(tempDir, "docs/agent-jump-start/canonical-spec.yaml")));
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("init fails in piped mode when a canonical spec exists unless --overwrite is explicit", () => {
+  const tempDir = makeTempDir();
+  try {
+    const specDir = join(tempDir, "docs/agent-jump-start");
+    mkdirSync(specDir, { recursive: true });
+    const specPath = join(specDir, "canonical-spec.yaml");
+    writeFileSync(specPath, JSON.stringify(makeMinimalSpec(), null, 2), "utf8");
+
+    const result = spawnSync(process.execPath, [
+      scriptPath, "init", "--guided", "--target", tempDir,
+    ], { encoding: "utf8", input: "fullstack-web\nnpm\n\nA valid workspace\na\na\na\nn\ny\n" });
+
+    expectFailure(result);
+    assert.match(result.stderr, /already exists/);
+    assert.match(result.stderr, /--overwrite/);
+    const preserved = JSON.parse(readFileSync(specPath, "utf8"));
+    assert.equal(preserved.project.name, "Test");
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("init --overwrite replaces an existing canonical spec in piped mode", () => {
+  const tempDir = makeTempDir();
+  try {
+    const specDir = join(tempDir, "docs/agent-jump-start");
+    mkdirSync(specDir, { recursive: true });
+    const specPath = join(specDir, "canonical-spec.yaml");
+    writeFileSync(specPath, JSON.stringify(makeMinimalSpec(), null, 2), "utf8");
+
+    const result = spawnSync(process.execPath, [
+      scriptPath, "init", "--guided", "--overwrite", "--target", tempDir,
+    ], { encoding: "utf8", input: "fullstack-web\nnpm\n\nA valid workspace\na\na\na\nn\ny\n" });
+
+    expectSuccess(result);
+    assert.match(result.stdout, /Overwriting existing canonical spec/);
+    const spec = JSON.parse(readFileSync(specPath, "utf8"));
+    assert.equal(spec.project.summary, "A valid workspace");
+    assert.ok(spec.project.components.includes("web: React application"));
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
 test("suggestPackageManagerRule returns correct rule for npm", () => {
   const rule = suggestPackageManagerRule("npm");
   assert.match(rule, /Use npm/);
@@ -3321,7 +3488,8 @@ test("init defaults to guided onboarding and core presets produce a non-generic 
     assert.ok(spec.workspaceInstructions.validation.length >= 1);
     assert.ok(spec.project.components.includes("web: React application"));
     assert.ok(spec.project.components.includes("api: Express.js REST service"));
-    assert.match(result.stdout, /Core starter presets:/);
+    assert.match(result.stdout, /Pick a starter:/);
+    assert.match(result.stdout, /Spec summary \(will be written/);
   } finally {
     cleanupTempDir(tempDir);
   }
@@ -4947,7 +5115,7 @@ test("init --guided accepts descriptive review keywords in addition to shortcut 
       dependencies: { express: "^4.18.0" },
     }), "utf8");
 
-    const stdinInput = "\nKeyword-driven app\nkeep\nkeep\nedit\nnpm run test:ci\nskip all\nno\n";
+    const stdinInput = "\nKeyword-driven app\nkeep\nkeep\nedit\nnpm run test:ci\nskip all\ny\n";
 
     const result = spawnSync(process.execPath, [
       scriptPath, "init", "--guided", "--target", tempDir,
@@ -5106,8 +5274,8 @@ test("init --guided normalizes raw stack aliases and seeds non-preset ecosystems
     assert.ok(spec.workspaceInstructions.validation.includes("bundle exec rspec"));
     assert.ok(spec.workspaceInstructions.sections.some((section) => section.title === "Go rules"));
     assert.ok(spec.workspaceInstructions.sections.some((section) => section.title === "Ruby rules"));
-    assert.match(result.stdout, /Core starter presets:/);
-    assert.match(result.stdout, /raw stacks like typescript, python, go, rails, dotnet, react-native/i);
+    assert.match(result.stdout, /Pick a starter:/);
+    assert.match(result.stdout, /Type a number \(1-6\), a preset slug, or a stack name/i);
   } finally {
     cleanupTempDir(tempDir);
   }

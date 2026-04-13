@@ -11,6 +11,25 @@ so versions are documented only where the history provides clear evidence.
 
 ## [Unreleased]
 
+### Added
+
+- Added broader onboarding stack detection for `.NET`, Rust, Go, Java, Ruby, PHP, and Dart/Flutter so existing repositories no longer fall back to a greenfield prompt when the project shape is already obvious.
+- Added runtime-based baseline validation seeding for detected ecosystems that do not expose explicit scripts yet, including `dotnet test`, `cargo test`, `go test ./...`, Maven/Gradle, Bundler, Composer, and Flutter defaults.
+- Added a numbered greenfield starter picker with curated categories and a pre-write confirmation screen that lets operators review or edit key draft fields before the canonical spec is written.
+
+### Changed
+
+- Tightened first-run guided onboarding so the greenfield stack picker now requires an explicit valid choice, `skip`, or `abort` instead of silently degrading after repeated invalid input.
+- Expanded the final guided confirmation step so operators can edit runtime rules, package manager rules, validation commands, and checklist presence in addition to name, summary, and components.
+- Improved GitHub `add-skill` recovery messages so missing tree paths now identify the missing remote path and ref, list available top-level folders, and suggest `--skill <slug>` for ambiguous cases.
+
+### Fixed
+
+- Fixed `init` overwrite protection so piped and scripted runs stop safely when a canonical spec already exists unless `--overwrite` is passed explicitly.
+- Fixed the last remaining P0 trust gap where a failed starter selection could still produce a weak generic spec and appear successful.
+- Fixed onboarding for first-run repos advertised as supported stacks but previously undetected by the introspector, especially `.NET` solution layouts.
+- Fixed GitHub URL skill-import failures that previously leaked temporary clone paths instead of giving the operator an actionable recovery path.
+
 ## [1.14.1] - 2026-04-13
 
 ### Changed
