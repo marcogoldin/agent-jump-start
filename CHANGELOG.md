@@ -11,6 +11,18 @@ so versions are documented only where the history provides clear evidence.
 
 ## [Unreleased]
 
+## [1.14.1] - 2026-04-13
+
+### Changed
+
+- Reworked the README opening around one clear first-run flow so new users can understand installation, onboarding, sync, and CI usage without stepping through duplicated sections.
+- Made guided CLI choice prompts explicit by rendering labels such as `keep (Y), edit (e), skip (n)` and `keep all (Y), review one by one (r), skip all (n)` instead of opaque shortcut-only brackets.
+
+### Fixed
+
+- Fixed guided onboarding review prompts so operators can type descriptive words like `keep`, `edit`, `skip`, and `review` in addition to single-letter shortcuts.
+- Reduced first-run onboarding ambiguity so terminal prompts explain the action before the shortcut instead of expecting the operator to infer letter meanings.
+
 ## [1.14.0] - 2026-04-12
 
 ### Added
@@ -27,7 +39,7 @@ so versions are documented only where the history provides clear evidence.
 - Reworked suggestion review to scale better on larger repositories with grouped keep-all / review / skip-all decisions for repeated sources such as `package.json` scripts.
 - Tightened greenfield onboarding copy so operators see a small curated path first instead of an undifferentiated list of every preset.
 - Sharpened first-run trust messaging so the CLI distinguishes starter scaffolding from trusted, repo-specific memory more clearly.
-- Closed the roadmap P0 bootstrap milestone and promoted layered specs to the next top priority.
+- Completed the guided onboarding rollout and moved layered spec support into the standard documented workflow.
 
 ### Fixed
 
@@ -94,7 +106,7 @@ so versions are documented only where the history provides clear evidence.
 ### Changed
 
 - Tightened layered-spec writeback behavior so mutating commands preserve ownership boundaries between base and leaf specs.
-- Cleaned local roadmap references out of the README.
+- Cleaned internal planning references out of the README and kept the documentation focused on shipped behavior.
 
 ## [1.10.2] - 2026-04-08
 
@@ -156,7 +168,8 @@ so versions are documented only where the history provides clear evidence.
 
 - Migrated the project license from MIT to MPL-2.0 during the initial public setup period.
 
-[Unreleased]: https://github.com/marcogoldin/agent-jump-start/compare/v1.14.0...HEAD
+[Unreleased]: https://github.com/marcogoldin/agent-jump-start/compare/v1.14.1...HEAD
+[1.14.1]: https://github.com/marcogoldin/agent-jump-start/compare/v1.14.0...v1.14.1
 [1.14.0]: https://github.com/marcogoldin/agent-jump-start/compare/v1.13.1...v1.14.0
 [1.13.1]: https://github.com/marcogoldin/agent-jump-start/compare/v1.13.0...v1.13.1
 [1.13.0]: https://github.com/marcogoldin/agent-jump-start/compare/v1.12.0...v1.13.0

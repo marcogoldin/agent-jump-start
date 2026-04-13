@@ -4,16 +4,9 @@ One canonical spec. Nine agent ecosystems. One `sync` command you can trust.
 
 Agent Jump Start lets you define project rules, review guidance, and reusable skills once, then render the correct instruction files for every supported coding agent.
 
-It is built for the real operator workflow:
-
-1. inspect the repo,
-2. draft or confirm the canonical spec,
-3. run one sync command,
-4. commit trusted outputs.
-
 Zero runtime dependencies. Only Node.js built-ins.
 
-## Why This Exists
+## Why Teams Use It
 
 Most teams using multiple AI coding tools drift into one of two bad states:
 
@@ -24,38 +17,97 @@ Agent Jump Start gives you a single source of truth:
 
 - one canonical spec
 - one canonical skill tree
-- one sync path for all supported agents
-- one check path for CI
+- one `sync` command for local maintenance
+- one `check` command for CI drift detection
 
-## What You Get In 5 Minutes
+## Start Here
 
-| If you want to... | Use this |
+Install it:
+
+```bash
+npm install -g @marcogoldin/agent-jump-start
+```
+
+Initialize a repository:
+
+```bash
+agent-jump-start init --target .
+```
+
+Review the generated spec, then sync all agent outputs:
+
+```bash
+agent-jump-start sync --spec docs/agent-jump-start/canonical-spec.yaml
+```
+
+Use `check` in CI:
+
+```bash
+agent-jump-start check --spec docs/agent-jump-start/canonical-spec.yaml --target .
+```
+
+That is the core product flow:
+
+- `init` creates the framework and drafts the canonical spec
+- `sync` keeps every supported agent output aligned
+- `check` tells CI when generated files drifted
+- `doctor` helps when the spec still looks generic
+
+## What `init` Does
+
+`init` starts guided onboarding by default.
+
+```bash
+agent-jump-start init --target .
+```
+
+If you need the classic placeholder bootstrap for automation:
+
+```bash
+agent-jump-start init --non-interactive --target .
+```
+
+During onboarding, Agent Jump Start can inspect repository signals such as manifests, scripts, lockfiles, CI workflows, linter configs, Python tooling, Docker files, and local conventions. In empty repositories it offers curated starter presets and stack aliases so the first draft is useful immediately.
+
+The guided flow proposes and reviews:
+
+- project name
+- project summary
+- repository components
+- package manager rule
+- runtime rule
+- **suggested validation commands** (detected from package.json scripts, Makefile, CI workflows)
+- **suggested workspace sections** (inferred from TypeScript, linter configs, CONTRIBUTING.md)
+- whether to keep the review checklist
+- **suggested checklist enhancements** (derived from detected validation commands)
+
+Every suggestion carries a provenance label (`detected` or `inferred`) so the operator can see where each item came from. In larger repos, repeated suggestions from the same source are grouped so the operator can keep all, review in detail, or skip all without prompt fatigue.
+
+Choice prompts spell out the action next to the shortcut, for example `keep (Y), edit (e), skip (n)` or `keep all (Y), review one by one (r), skip all (n)`. The guided flow also accepts the full words (`keep`, `edit`, `skip`, `review`) in addition to the single-letter shortcuts.
+
+During component review, mixed and monorepo-style repos also surface **primary** and **secondary** slices to make ownership clearer before anything is written into the spec.
+
+At the end of onboarding, Agent Jump Start prints a trust summary that tells the operator what they edited, what they skipped, where to verify it in the spec, and the exact next command to run.
+
+It works both in a real TTY and with piped stdin, so it can be tested or automated.
+
+## Common Commands
+
+| If you want to... | Command |
 |---|---|
-| Start from your current repo instead of a blank spec | `agent-jump-start init --target .` |
-| Start from an empty repo with a curated guided cold start | `agent-jump-start init --target .` |
-| Render and clean every agent output in one step | `agent-jump-start sync --spec docs/agent-jump-start/canonical-spec.yaml` |
-| Verify CI drift without writing files | `agent-jump-start check --spec docs/agent-jump-start/canonical-spec.yaml --target .` |
-| Diagnose weak placeholder content in the spec | `agent-jump-start doctor --spec docs/agent-jump-start/canonical-spec.yaml` |
-| Adopt local skills already written by other tools | `agent-jump-start intake --spec docs/agent-jump-start/canonical-spec.yaml` |
+| Initialize a repo and draft the canonical spec | `agent-jump-start init --target .` |
+| Use the non-interactive bootstrap for automation | `agent-jump-start init --non-interactive --target .` |
+| Re-render and clean every managed output | `agent-jump-start sync --spec docs/agent-jump-start/canonical-spec.yaml` |
+| Fail CI when generated files drifted | `agent-jump-start check --spec docs/agent-jump-start/canonical-spec.yaml --target .` |
+| Diagnose generic or incomplete spec content | `agent-jump-start doctor --spec docs/agent-jump-start/canonical-spec.yaml` |
+| Inspect repo evidence before editing the spec manually | `agent-jump-start infer --target .` |
+| Generate a schema-shaped overlay from repo evidence | `agent-jump-start infer-overlay --target . --base canonical-spec.yaml --output overlay.yaml` |
+| Adopt skills already present in local agent folders | `agent-jump-start intake --spec docs/agent-jump-start/canonical-spec.yaml` |
+| Import one explicit skill package | `agent-jump-start import-skill --spec docs/agent-jump-start/canonical-spec.yaml --skill path/to/skill-directory` |
 
-## Recommended Path
+`sync` is the normal maintenance command. It renders outputs, removes stale files, and verifies consistency in one step. If it finds local skills under `.agents/skills/`, `.claude/skills/`, or `.github/skills/` that are outside canonical management, it points you to `intake`.
 
-For most users, this is the right flow:
-
-| Step | Command | Outcome |
-|---|---|---|
-| 1. Initialize | `agent-jump-start init --target .` | Creates the framework, proposes a draft spec, and renders first outputs |
-| 2. Review | Edit `docs/agent-jump-start/canonical-spec.yaml` | Confirm project rules, validation, review checklist, and skills |
-| 3. Sync | `agent-jump-start sync --spec docs/agent-jump-start/canonical-spec.yaml` | Re-renders, cleans stale files, and verifies drift in one command |
-| 4. Commit | `git add ... && git commit ...` | Commits the spec plus generated agent instructions |
-
-### First Run Shortcuts
-
-| Your situation | Start here | What happens |
-|---|---|---|
-| Existing Node.js / Python / mixed repo | `agent-jump-start init --target .` | Agent Jump Start inspects the repo, proposes a draft, and lets you confirm or edit it |
-| Empty repo, but you know the intended stack | `agent-jump-start init --target .` | The CLI offers curated starter presets and stack aliases so you can bootstrap a useful first draft quickly |
-| CI or scripting flow where prompts are wrong | `agent-jump-start init --non-interactive --target .` | Uses the classic non-guided placeholder bootstrap |
+The canonical spec uses a strict YAML subset that is also valid JSON, so it stays easy to read and can be parsed without extra runtime dependencies.
 
 ## Supported Agents
 
@@ -81,9 +133,7 @@ For most users, this is the right flow:
 - Node.js >= 18
 - No npm dependencies required
 
-## Installation
-
-Choose one of these:
+## Installation Options
 
 | Install path | Best for | Command |
 |---|---|---|
@@ -91,236 +141,7 @@ Choose one of these:
 | `npx` | One-off execution without install | `npx @marcogoldin/agent-jump-start@latest <command>` |
 | Vendored in-repo copy | Teams that want the toolkit committed inside the repo | `git clone https://github.com/marcogoldin/agent-jump-start.git docs/agent-jump-start` |
 
-### Global install with npm
-
-```bash
-npm install -g @marcogoldin/agent-jump-start
-```
-
-### Global install with yarn
-
-```bash
-yarn global add @marcogoldin/agent-jump-start
-```
-
-### `npx` without install
-
-Run any command directly without installing:
-
-```bash
-npx @marcogoldin/agent-jump-start@latest <command> [options]
-```
-
-### Clone from GitHub
-
-Use this when you want the full toolkit vendored into your repository:
-
-```bash
-git clone https://github.com/marcogoldin/agent-jump-start.git docs/agent-jump-start
-```
-
-Then run commands with `node docs/agent-jump-start/scripts/agent-jump-start.mjs` instead of `agent-jump-start`.
-
-The most reliable execution paths today are:
-
-- `agent-jump-start` after a global install
-- vendored usage via `node docs/agent-jump-start/scripts/agent-jump-start.mjs`
-
-Direct `npx @marcogoldin/agent-jump-start@latest ...` may also work, but some npm environments do not resolve the published bin consistently.
-
-## Quick Start
-
-Initialize a project with one command.
-
-```bash
-# Recommended: guided onboarding is now the default
-agent-jump-start init --target .
-
-# Classic non-interactive bootstrap for CI or scripting
-agent-jump-start init --non-interactive --target .
-
-# With a built-in stack profile
-npx @marcogoldin/agent-jump-start@latest init \
-  --profile specs/profiles/react-vite-mui.profile.yaml \
-  --target .
-```
-
-Then sync everything:
-
-```bash
-agent-jump-start sync \
-  --spec docs/agent-jump-start/canonical-spec.yaml
-```
-
-This creates:
-
-- `docs/agent-jump-start/canonical-spec.yaml` — your canonical specification
-- `docs/agent-jump-start/` — framework files (scripts, lib, specs, prompts)
-- All generated instruction files for the 9 supported agents
-
-If you want the simplest mental model, remember only this:
-
-- `init` gets you started
-- `sync` keeps all agent outputs correct
-- `check` is for CI
-- `doctor` tells you when the spec is still too generic
-
-## Which Command Should I Use?
-
-| Situation | Command |
-|---|---|
-| “Set this up in a repo for the first time” | `agent-jump-start init --target .` |
-| “Set this up in an empty repo and pick the stack interactively” | `agent-jump-start init --target .` |
-| “I need the old non-interactive bootstrap for CI or automation” | `agent-jump-start init --non-interactive --target .` |
-| “I edited the spec and want all agents updated” | `agent-jump-start sync --spec docs/agent-jump-start/canonical-spec.yaml` |
-| “I need CI to fail if generated files drifted” | `agent-jump-start check --spec docs/agent-jump-start/canonical-spec.yaml --target .` |
-| “The spec still looks scaffolded or weak” | `agent-jump-start doctor --spec docs/agent-jump-start/canonical-spec.yaml` |
-| “Another tool already dropped skills into local agent folders” | `agent-jump-start intake --spec docs/agent-jump-start/canonical-spec.yaml` |
-| “I want to import one explicit skill package” | `agent-jump-start import-skill --spec docs/agent-jump-start/canonical-spec.yaml --skill path/to/skill-directory` |
-
-## Onboarding Experience
-
-`init` now starts the guided onboarding flow by default.
-
-```bash
-agent-jump-start init --target .
-```
-
-If you need the classic placeholder flow for CI or scripting, use:
-
-```bash
-agent-jump-start init --non-interactive --target .
-```
-
-The guided flow is designed around the real first-run operator experience:
-
-1. inspect the repository,
-2. draft the canonical spec from real signals,
-3. let the operator confirm, edit, or skip suggestions,
-4. finish with one clear next step: `sync`.
-
-On existing repositories, onboarding scans for:
-
-- `package.json` dependency signals such as Express, React, Next.js, Vue, NestJS, Fastify, MUI, Tailwind, AWS SDKs
-- `package.json` scripts such as `test`, `lint`, `typecheck`, `build`
-- Python manifests such as `pyproject.toml`, `requirements.txt`, `Pipfile`, `setup.py`
-- `pyproject.toml` tool sections such as `[tool.pytest]`, `[tool.ruff]`, `[tool.mypy]`
-- mixed-runtime signals such as `pymilvus`, `boto3`, FastAPI, Django, Flask
-- lockfiles to infer npm / yarn / pnpm / bun
-- `Makefile` / `justfile` validation targets
-- `.github/workflows/*.yml` run commands
-- `.pre-commit-config.yaml` hooks
-- linter/formatter configs (`.eslintrc*`, `.prettierrc*`, `ruff.toml`, `.editorconfig`)
-- `CONTRIBUTING.md` development conventions
-- `Dockerfile`, `docker-compose.yml`, `.github/workflows`, `tsconfig.json`
-
-On empty repositories, onboarding offers:
-
-- a curated core set of starter presets for common project types
-- support for stack aliases such as `golang`, `ruby on rails`, `.net`, `next.js`, and `react-native`
-- seeded runtime, validation, and workspace guidance so the first draft is not generic boilerplate
-
-The guided flow proposes and reviews:
-
-- project name
-- project summary
-- repository components
-- package manager rule
-- runtime rule
-- **suggested validation commands** (detected from package.json scripts, Makefile, CI workflows)
-- **suggested workspace sections** (inferred from TypeScript, linter configs, CONTRIBUTING.md)
-- whether to keep the review checklist
-- **suggested checklist enhancements** (derived from detected validation commands)
-
-Every suggestion carries a provenance label (`detected` or `inferred`) so the operator can see where each item came from. In larger repos, repeated suggestions from the same source are grouped so the operator can keep all, review in detail, or skip all without prompt fatigue.
-
-During component review, mixed and monorepo-style repos also surface **primary** and **secondary** slices to make ownership clearer before anything is written into the spec.
-
-At the end of onboarding, Agent Jump Start prints a trust summary that tells the operator what they edited, what they skipped, where to verify it in the spec, and the exact next command to run.
-
-It works both in a real TTY and with piped stdin, so it can be tested or automated.
-
-## Workflow
-
-### 1. Start with the canonical spec
-
-Open `docs/agent-jump-start/canonical-spec.yaml` and fill in:
-
-- Project name and summary
-- Repository components
-- Workspace rules
-- Validation commands
-- Review checklist
-- Skills (optional)
-
-If you used `init`, many of these fields are already populated from repo evidence. If you started from a non-interactive placeholder spec, you can use `infer` to discover validation commands, workspace rules, and checklist items from the repository:
-
-```bash
-# Preview what the tool can detect from the repo
-agent-jump-start infer --target .
-
-# Export a structured JSON inference report with provenance labels
-agent-jump-start infer --target . --output inferred-report.json --format json
-```
-
-`infer` exports a structured inference report with provenance labels (`detected` / `inferred`) for operator review. When you need a machine-ready spec fragment instead, use `infer-overlay`:
-
-```bash
-# Generate a layered overlay that extends a base spec
-agent-jump-start infer-overlay --target . --base canonical-spec.yaml --output overlay.yaml
-
-# Generate a partial overlay fragment for manual merge/review
-agent-jump-start infer-overlay --target . --output overlay-fragment.yaml
-
-# Restrict to a specific section
-agent-jump-start infer-overlay --target . --section validation
-```
-
-`infer-overlay` strips provenance metadata and reshapes inference output to match the canonical JSON Schema.
-
-- with `--base`, it generates a layered overlay that can be validated and used directly with `render` / `sync`
-- without `--base`, it generates a partial overlay fragment that is useful for manual merge or further editing, but may not validate on its own
-
-The spec uses a strict YAML subset that is also valid JSON and can be parsed with `JSON.parse`, keeping the generator zero-dependency.
-
-### 2. Sync everything with one command
-
-```bash
-agent-jump-start sync \
-  --spec docs/agent-jump-start/canonical-spec.yaml
-```
-
-`sync` is the recommended maintenance command. It renders all outputs, removes stale files, and verifies synchronization in one step. It replaces the manual `render --clean` + `check` sequence.
-
-If `sync` finds local skill packages under `.agents/skills/`, `.claude/skills/`, or `.github/skills/` that are not yet managed by the canonical spec, it prints an advisory and points you to `intake`.
-
-### 3. Diagnose weak or incomplete content when needed
-
-```bash
-agent-jump-start doctor \
-  --spec docs/agent-jump-start/canonical-spec.yaml
-
-# With --suggest: show inferred replacements alongside warnings
-agent-jump-start doctor \
-  --spec docs/agent-jump-start/canonical-spec.yaml \
-  --suggest --target .
-```
-
-`doctor` inspects the spec for placeholder text, generic validation commands, missing components, and other signs that the setup is still scaffolded rather than production-ready. Exits with code `1` when warnings are found.
-
-When `--suggest` and `--target` are provided, doctor also runs repo inference and prints suggested replacements alongside each warning. No auto-write — the operator reviews and applies what they want.
-
-### 4. Commit the spec and generated outputs
-
-```bash
-git add docs/agent-jump-start/canonical-spec.yaml \
-  docs/agent-jump-start/agent-jump-start.lock.json \
-  .agents/ .claude/ .github/ .cursor/ .roo/ .continue/ \
-  AGENTS.md CLAUDE.md .windsurfrules .clinerules CONVENTIONS.md \
-  docs/agent-review-checklist.md
-
-git commit -m "sync: update agent instructions from canonical spec"
-```
+The most reliable execution paths are the global `agent-jump-start` binary and vendored usage via `node docs/agent-jump-start/scripts/agent-jump-start.mjs`.
 
 ## Skill Packages
 
@@ -351,7 +172,7 @@ Supported import sources:
 - A standalone `SKILL.md` file
 - A legacy JSON skill file
 
-Each successful `import-skill` run also updates `agent-jump-start.lock.json` next to the spec. The lockfile records the imported skill slug, version, checksum, source, and resolved path so future refresh workflows can be audited and reproduced safely.
+Each successful `import-skill` run also updates `agent-jump-start.lock.json` next to the spec. The lockfile records the imported skill slug, version, checksum, source, and resolved path so refresh workflows can be audited and reproduced safely.
 
 ### Intake locally installed skills
 
@@ -630,14 +451,14 @@ agent-jump-start export-schema --output canonical-spec.schema.json
 
 ## Current Limitations
 
-- Layered specs (`extends`) are functional and write-safe for current workflows, but monorepo governance and ownership policy are not fully defined yet.
+- Layered specs (`extends`) are write-safe, but monorepo ownership policy remains explicit and manual in the spec.
 - `infer-overlay --base <spec>` produces a layered overlay that can be validated directly. Without `--base`, the command emits a partial overlay fragment intended for manual merge or further editing.
-- `intake --import --replace` is provenance-safe: skills tracked with upstream provenance (github, skills, skillfish) are never downgraded to local-directory. Only locally-tracked managed skills can be replaced via intake.
+- `intake --import --replace` is provenance-safe: skills tracked with upstream provenance (`github`, `skills`, `skillfish`) are never downgraded to `local-directory`. Only locally tracked managed skills can be replaced via intake.
 - Broken symlinks in local skill directories are silently skipped during discovery and do not crash sync.
 - Continue, Aider, Windsurf, Cline, and Roo Code do not receive native skill packages; they receive mirrored workspace guidance plus inline skill summaries.
-- Remote skill import is currently limited to GitHub sources plus `skills` and `skillfish` adapters. Generic registries are not implemented yet.
+- Remote skill import supports GitHub sources plus `skills` and `skillfish` adapters.
 - Skills installed directly by third-party CLIs into `./.agents/skills/` remain unmanaged until they are imported into the canonical spec.
-- Direct `npx @marcogoldin/agent-jump-start@latest ...` execution may not resolve the published bin consistently across npm environments; global install and vendored usage are the most reliable paths today.
+- Direct `npx @marcogoldin/agent-jump-start@latest ...` execution may not resolve the published bin consistently across npm environments; global install and vendored usage are the most reliable paths.
 
 ## Portability
 
@@ -657,7 +478,7 @@ and reimplement the renderer elsewhere.
 npm test
 ```
 
-183 tests covering core workflows, sync command, doctor diagnostics, layered specs, writeback semantics, deep introspection, spec inference, overlay generation, assisted bootstrap, guided onboarding, project introspection, skill import/export, provenance lockfiles, `update-skills` refresh flows, progressive disclosure, high-level source adapters, semantic classification, mirror sync integrity, round-trip stability, provenance-safe intake replace, symlink resilience, and single-command trust regressions.
+198 tests covering core workflows, sync command, doctor diagnostics, layered specs, writeback semantics, deep introspection, spec inference, overlay generation, assisted bootstrap, guided onboarding, project introspection, skill import/export, provenance lockfiles, `update-skills` refresh flows, progressive disclosure, high-level source adapters, semantic classification, mirror sync integrity, round-trip stability, provenance-safe intake replace, symlink resilience, and single-command trust regressions.
 
 ## Contributing
 

@@ -10,7 +10,7 @@ import { mergeByKey, mergeSpecLayers, resolveLayeredSpec, resolveLayeredSpecWith
 import { validateSpec } from "../lib/validation.mjs";
 import { discoverUnmanagedSkills } from "../lib/intake.mjs";
 import { findSkillCandidates } from "../lib/skills.mjs";
-import { reviewSuggestedEntries } from "../lib/interactive.mjs";
+import { reviewSuggestedEntries, normalizeChoiceDefinitions, formatChoiceHint, resolveChoiceInput } from "../lib/interactive.mjs";
 
 const scriptPath = resolve("scripts/agent-jump-start.mjs");
 
@@ -4932,9 +4932,58 @@ test("init --guided lets the operator keep and skip validation commands item by 
     assert.ok(spec.workspaceInstructions.validation.includes("npm run test"));
     assert.ok(!spec.workspaceInstructions.validation.includes("npm run lint"));
     assert.doesNotMatch(result.stderr, /Accept 2 suggested validation command/);
+    assert.match(result.stderr, /keep \(Y\), edit \(e\), skip \(n\), keep all remaining \(a\), skip all remaining \(s\)/i);
   } finally {
     cleanupTempDir(tempDir);
   }
+});
+
+test("init --guided accepts descriptive review keywords in addition to shortcut letters", () => {
+  const tempDir = makeTempDir();
+  try {
+    writeFileSync(join(tempDir, "package.json"), JSON.stringify({
+      name: "guided-keywords-test",
+      scripts: { test: "vitest", lint: "eslint ." },
+      dependencies: { express: "^4.18.0" },
+    }), "utf8");
+
+    const stdinInput = "\nKeyword-driven app\nkeep\nkeep\nedit\nnpm run test:ci\nskip all\nno\n";
+
+    const result = spawnSync(process.execPath, [
+      scriptPath, "init", "--guided", "--target", tempDir,
+    ], {
+      encoding: "utf8",
+      input: stdinInput,
+    });
+
+    assert.equal(result.status, 0,
+      `Expected success.\nSTDOUT:\n${result.stdout}\nSTDERR:\n${result.stderr}`);
+
+    const specPath = join(tempDir, "docs/agent-jump-start/canonical-spec.yaml");
+    const spec = JSON.parse(readFileSync(specPath, "utf8"));
+
+    assert.ok(spec.workspaceInstructions.validation.includes("npm run test:ci"));
+    assert.ok(!spec.workspaceInstructions.validation.includes("npm run lint"));
+    assert.match(result.stderr, /keep \(Y\), edit \(e\), skip \(n\), keep all remaining \(a\), skip all remaining \(s\)/i);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("interactive choice helpers render explicit bulk review labels and accept keyword input", () => {
+  const choices = normalizeChoiceDefinitions([
+    { key: "y", label: "keep all", aliases: ["yes", "keep", "accept all"] },
+    { key: "r", label: "review one by one", aliases: ["review", "review individually", "one by one"] },
+    { key: "n", label: "skip all", aliases: ["no", "skip"] },
+  ]);
+
+  assert.equal(
+    formatChoiceHint(choices, "y"),
+    "[keep all (Y), review one by one (r), skip all (n)]",
+  );
+  assert.equal(resolveChoiceInput("review", choices, "y"), "r");
+  assert.equal(resolveChoiceInput("skip", choices, "y"), "n");
+  assert.equal(resolveChoiceInput("", choices, "y"), "y");
 });
 
 test("reviewSuggestedEntries returns accepted items and detailed bulk stats", async () => {
