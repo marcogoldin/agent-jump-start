@@ -1,0 +1,30 @@
+{
+  "extends": "../../base.yaml",
+  "project": {
+    "name": "Example Monorepo — api",
+    "summary": "Backend package overlay. Inherits shared rules from base.yaml and adds API-specific runtime, validation, and review rules.",
+    "components": [
+      "API service (backend package in this monorepo)"
+    ]
+  },
+  "workspaceInstructions": {
+    "packageManagerRule": "Use pnpm for this package. Do not mix with npm or yarn lockfiles.",
+    "runtimeRule": "Node 20.x on the server. Match the Node version used in CI and in deployed environments.",
+    "sections": [
+      {
+        "title": "API-specific rules",
+        "rules": [
+          "Treat every HTTP handler as a security boundary: validate inputs, never trust client-supplied identifiers without an authorization check.",
+          "Log structured events, not raw request dumps. Never log secrets, tokens, or full request bodies by default.",
+          "Return stable error shapes: do not leak internal error details, stack traces, or framework internals to clients."
+        ]
+      }
+    ],
+    "validation": [
+      "pnpm lint",
+      "pnpm typecheck",
+      "pnpm test",
+      "pnpm test:integration"
+    ]
+  }
+}

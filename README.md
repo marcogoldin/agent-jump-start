@@ -449,9 +449,20 @@ Export the canonical spec JSON Schema for IDE autocompletion and validation:
 agent-jump-start export-schema --output canonical-spec.schema.json
 ```
 
+## Layered Specs (Monorepos)
+
+One base, many leaves. Each leaf uses `extends` to inherit shared rules and
+overrides only what differs. The **base owns what is shared, each leaf owns
+what makes its package different**, and every mutating command (`import-skill`,
+`update-skills`, `intake`, `add-skill`) writes back **only to the leaf**.
+Validation errors name the layer that owns the offending field, so you always
+know which file to open.
+
+- Operator guide: [docs/layered-specs.md](docs/layered-specs.md)
+- Copyable two-package example: [specs/examples/monorepo/](specs/examples/monorepo/)
+
 ## Current Limitations
 
-- Layered specs (`extends`) are write-safe, but monorepo ownership policy remains explicit and manual in the spec.
 - `infer-overlay --base <spec>` produces a layered overlay that can be validated directly. Without `--base`, the command emits a partial overlay fragment intended for manual merge or further editing.
 - `intake --import --replace` is provenance-safe: skills tracked with upstream provenance (`github`, `skills`, `skillfish`) are never downgraded to `local-directory`. Only locally tracked managed skills can be replaced via intake.
 - Broken symlinks in local skill directories are silently skipped during discovery and do not crash sync.
@@ -478,7 +489,7 @@ and reimplement the renderer elsewhere.
 npm test
 ```
 
-198 tests covering core workflows, sync command, doctor diagnostics, layered specs, writeback semantics, deep introspection, spec inference, overlay generation, assisted bootstrap, guided onboarding, project introspection, skill import/export, provenance lockfiles, `update-skills` refresh flows, progressive disclosure, high-level source adapters, semantic classification, mirror sync integrity, round-trip stability, provenance-safe intake replace, symlink resilience, and single-command trust regressions.
+213 tests covering core workflows, sync command, doctor diagnostics, layered specs, layer-aware validation diagnostics, leaf-only writeback semantics, deep introspection, spec inference, overlay generation, assisted bootstrap, guided onboarding, project introspection, skill import/export, provenance lockfiles, `update-skills` refresh flows, progressive disclosure, high-level source adapters, semantic classification, mirror sync integrity, round-trip stability, provenance-safe intake replace, symlink resilience, and single-command trust regressions.
 
 ## Contributing
 

@@ -5627,3 +5627,154 @@ test("infer-overlay command fails without --target", () => {
   assert.notEqual(result.status, 0, "Should fail without --target");
   assert.match(result.stderr, /target/i);
 });
+
+// ===========================================================================
+// P0 closure — monorepo example, layer-aware errors, leaf-only writeback
+// ===========================================================================
+
+import { cpSync as cpSyncFs } from "node:fs";
+
+function copyMonorepoExample(destRoot) {
+  const src = resolve("specs/examples/monorepo");
+  const dest = join(destRoot, "monorepo");
+  cpSyncFs(src, dest, { recursive: true });
+  return dest;
+}
+
+test("monorepo example: both leaves resolve, validate, and sync end-to-end", () => {
+  const tempDir = makeTempDir();
+  try {
+    const repo = copyMonorepoExample(tempDir);
+    for (const pkg of ["web", "api"]) {
+      const leaf = join(repo, "packages", pkg, "canonical-spec.yaml");
+      const target = join(repo, "packages", pkg);
+      const valResult = runCli(["validate", "--spec", leaf]);
+      expectSuccess(valResult);
+      assert.match(valResult.stdout, /Layer chain:/, `validate should print layer chain for ${pkg}`);
+      assert.match(valResult.stdout, /Leaf \(writeback target\):/, `validate should name the leaf for ${pkg}`);
+
+      expectSuccess(runCli(["sync", "--spec", leaf, "--target", target]));
+      assert.ok(existsSync(join(target, ".agents/AGENTS.md")), `${pkg} should render canonical AGENTS.md`);
+      assert.ok(existsSync(join(target, "AGENTS.md")), `${pkg} should render mirror AGENTS.md`);
+    }
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("monorepo example: leaf web spec inherits base sections and adds web-specific section", () => {
+  const tempDir = makeTempDir();
+  try {
+    const repo = copyMonorepoExample(tempDir);
+    const leafPath = join(repo, "packages/web/canonical-spec.yaml");
+    const meta = resolveLayeredSpecWithMeta(leafPath);
+    const titles = meta.merged.workspaceInstructions.sections.map((s) => s.title);
+    assert.deepEqual(
+      titles,
+      ["General rules", "Cross-package rules", "Web-specific rules"],
+      "merged sections should preserve base order then append the leaf-only section",
+    );
+    assert.deepEqual(
+      meta.merged.workspaceInstructions.validation,
+      ["pnpm lint", "pnpm typecheck", "pnpm test"],
+      "leaf validation array should fully replace the base validation array",
+    );
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("layered validation: error owned by the leaf names the leaf path", () => {
+  const tempDir = makeTempDir();
+  try {
+    const repo = copyMonorepoExample(tempDir);
+    const leaf = join(repo, "packages/web/canonical-spec.yaml");
+    const broken = {
+      extends: "../../base.yaml",
+      workspaceInstructions: {
+        sections: [{ title: "Web-specific rules" }],
+      },
+    };
+    writeFileSync(leaf, `${JSON.stringify(broken, null, 2)}\n`, "utf8");
+
+    const result = runCli(["validate", "--spec", leaf]);
+    expectFailure(result);
+    const out = `${result.stdout}\n${result.stderr}`;
+    assert.match(out, /workspaceInstructions\.sections\[\d+\]\.rules/, "should name the offending field with its merged index");
+    assert.match(out, /from layer:.*packages\/web\/canonical-spec\.yaml/, "should attribute the error to the leaf layer");
+    assert.match(out, /Layer chain:.*base\.yaml.*canonical-spec\.yaml/, "should print the chain");
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("layered validation: error owned by the base names the base path", () => {
+  const tempDir = makeTempDir();
+  try {
+    const repo = copyMonorepoExample(tempDir);
+    const basePath = join(repo, "base.yaml");
+    const base = JSON.parse(readFileSync(basePath, "utf8"));
+    base.reviewChecklist.intro = "";
+    writeFileSync(basePath, `${JSON.stringify(base, null, 2)}\n`, "utf8");
+
+    const leaf = join(repo, "packages/api/canonical-spec.yaml");
+    const result = runCli(["validate", "--spec", leaf]);
+    expectFailure(result);
+    const out = `${result.stdout}\n${result.stderr}`;
+    assert.match(out, /reviewChecklist\.intro is required/, "should describe the error");
+    assert.match(out, /from layer:.*base\.yaml/, "should attribute the error to the base layer, not the leaf");
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("layered writeback: import-skill announces leaf-only writeback and leaves the base untouched", () => {
+  const tempDir = makeTempDir();
+  try {
+    const repo = copyMonorepoExample(tempDir);
+    const leaf = join(repo, "packages/web/canonical-spec.yaml");
+    const baseBefore = readFileSync(join(repo, "base.yaml"), "utf8");
+
+    const skillJson = join(tempDir, "skill.json");
+    writeFileSync(skillJson, JSON.stringify([{
+      slug: "monorepo-demo",
+      title: "Monorepo Demo",
+      description: "Demo skill that should land only in the leaf.",
+      version: "1.0.0",
+      appliesWhen: ["Manual review"],
+      categories: [{ priority: 1, name: "General", impact: "MEDIUM", prefix: "gen-" }],
+      rules: [{ id: "gen-1", category: "General", title: "Be honest", impact: "MEDIUM", summary: "Honest by default." }],
+    }]), "utf8");
+
+    const result = runCli(["import-skill", "--spec", leaf, "--skill", skillJson]);
+    expectSuccess(result);
+    assert.match(result.stdout, /Layered spec detected: writeback will only modify the leaf file/, "import-skill should announce leaf-only writeback");
+    assert.match(result.stdout, /Added: +monorepo-demo/, "import-skill should add the skill");
+
+    const baseAfter = readFileSync(join(repo, "base.yaml"), "utf8");
+    assert.equal(baseAfter, baseBefore, "base.yaml must not be modified by import-skill");
+
+    const leafSpec = JSON.parse(readFileSync(leaf, "utf8"));
+    assert.deepEqual(leafSpec.skills?.map((s) => s.slug) ?? [], ["monorepo-demo"], "skill must land in the leaf");
+
+    const apiLeaf = JSON.parse(readFileSync(join(repo, "packages/api/canonical-spec.yaml"), "utf8"));
+    assert.equal(apiLeaf.skills, undefined, "the other package leaf must not be touched");
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("layered writeback: update-skills announces leaf-only writeback when invoked on a layered spec", () => {
+  const tempDir = makeTempDir();
+  try {
+    const repo = copyMonorepoExample(tempDir);
+    const leaf = join(repo, "packages/web/canonical-spec.yaml");
+    const result = runCli(["update-skills", "--spec", leaf, "--dry-run"]);
+    // No skills tracked yet → command exits non-zero with an explanatory
+    // error, but the layered notice must print before that error.
+    const out = `${result.stdout}\n${result.stderr}`;
+    assert.match(out, /Layered spec detected: updates will only modify the leaf file/, "update-skills should announce leaf-only writeback");
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});

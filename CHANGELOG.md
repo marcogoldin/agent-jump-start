@@ -13,15 +13,28 @@ so versions are documented only where the history provides clear evidence.
 
 ### Added
 
+### Changed
+
+### Fixed
+
+## [1.15.0] - 2026-04-14
+
+### Added
+
 - Added broader onboarding stack detection for `.NET`, Rust, Go, Java, Ruby, PHP, and Dart/Flutter so existing repositories no longer fall back to a greenfield prompt when the project shape is already obvious.
 - Added runtime-based baseline validation seeding for detected ecosystems that do not expose explicit scripts yet, including `dotnet test`, `cargo test`, `go test ./...`, Maven/Gradle, Bundler, Composer, and Flutter defaults.
 - Added a numbered greenfield starter picker with curated categories and a pre-write confirmation screen that lets operators review or edit key draft fields before the canonical spec is written.
+- Added a copyable layered-spec monorepo example under `specs/examples/monorepo/` with one shared base and realistic `web` and `api` leaf specs.
+- Added a dedicated `docs/layered-specs.md` operator guide covering ownership, writeback semantics, merge rules, `infer-overlay --base`, and common layered-spec pitfalls.
 
 ### Changed
 
 - Tightened first-run guided onboarding so the greenfield stack picker now requires an explicit valid choice, `skip`, or `abort` instead of silently degrading after repeated invalid input.
 - Expanded the final guided confirmation step so operators can edit runtime rules, package manager rules, validation commands, and checklist presence in addition to name, summary, and components.
 - Improved GitHub `add-skill` recovery messages so missing tree paths now identify the missing remote path and ref, list available top-level folders, and suggest `--skill <slug>` for ambiguous cases.
+- Made layered-spec validation output operator-facing by printing the full layer chain and, on success, the leaf writeback target.
+- Made `import-skill`, `add-skill`, `intake --import`, and `update-skills` announce the leaf-only writeback contract before modifying a layered spec.
+- Expanded the README with a dedicated layered-specs section that links the operator guide and copyable monorepo example.
 
 ### Fixed
 
@@ -29,6 +42,9 @@ so versions are documented only where the history provides clear evidence.
 - Fixed the last remaining P0 trust gap where a failed starter selection could still produce a weak generic spec and appear successful.
 - Fixed onboarding for first-run repos advertised as supported stacks but previously undetected by the introspector, especially `.NET` solution layouts.
 - Fixed GitHub URL skill-import failures that previously leaked temporary clone paths instead of giving the operator an actionable recovery path.
+- Fixed layered-spec validation errors so they now attribute failures to the owning layer instead of only naming the merged result.
+- Fixed vendored `init` scaffolding so the new layered diagnostics module is copied alongside the rest of the CLI runtime.
+- Fixed README/test metadata drift by documenting the current 213-test release surface and shipping the layered-spec operator guide in the npm package.
 
 ## [1.14.1] - 2026-04-13
 
@@ -187,7 +203,8 @@ so versions are documented only where the history provides clear evidence.
 
 - Migrated the project license from MIT to MPL-2.0 during the initial public setup period.
 
-[Unreleased]: https://github.com/marcogoldin/agent-jump-start/compare/v1.14.1...HEAD
+[Unreleased]: https://github.com/marcogoldin/agent-jump-start/compare/v1.15.0...HEAD
+[1.15.0]: https://github.com/marcogoldin/agent-jump-start/compare/v1.14.1...v1.15.0
 [1.14.1]: https://github.com/marcogoldin/agent-jump-start/compare/v1.14.0...v1.14.1
 [1.14.0]: https://github.com/marcogoldin/agent-jump-start/compare/v1.13.1...v1.14.0
 [1.13.1]: https://github.com/marcogoldin/agent-jump-start/compare/v1.13.0...v1.13.1

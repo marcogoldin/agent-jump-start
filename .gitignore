@@ -159,7 +159,9 @@ coverage/
 # -----------------------------------------------------------------------------
 # Miscellaneous
 # -----------------------------------------------------------------------------
-docs/
+docs/*
+!docs/layered-specs.md
+docs/implementation-prompts/
 *.bak
 *.orig
 *.patch

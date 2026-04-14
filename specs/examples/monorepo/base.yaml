@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 1,
+  "project": {
+    "name": "Example Monorepo",
+    "summary": "Shared base spec for a realistic two-package monorepo: one web frontend and one API backend.",
+    "components": [
+      "Shared engineering standards across packages",
+      "Cross-package review expectations"
+    ]
+  },
+  "workspaceInstructions": {
+    "packageManagerRule": "Use the package managers already chosen by each package. Do not introduce alternatives unless the package explicitly asks for one.",
+    "runtimeRule": "Keep local development and CI aligned on the same supported runtime versions per package.",
+    "sections": [
+      {
+        "title": "General rules",
+        "rules": [
+          "Prefer small, reviewable changes that preserve current behavior unless the task explicitly asks for a behavior change.",
+          "Preserve accessibility, security boundaries, and SSR-safe browser API usage where relevant.",
+          "Avoid avoidable request waterfalls and unnecessary bundle or runtime cost.",
+          "Prefer explicit, composable architecture over hidden flags, ad hoc branching, or duplicated logic.",
+          "Update package documentation whenever runtime requirements, setup, or operational behavior change."
+        ]
+      },
+      {
+        "title": "Cross-package rules",
+        "rules": [
+          "Any change that crosses the web/api boundary must be reviewed against both packages, not just the one the change originated in.",
+          "Shared types, shared validation, and shared error shapes live at the repository root, never in one package only."
+        ]
+      }
+    ],
+    "validation": [
+      "Each package must document and run its own baseline validation commands; the base does not assume one shared command."
+    ]
+  },
+  "reviewChecklist": {
+    "intro": "Shared checklist applied to changes in any package of this monorepo.",
+    "failureThreshold": 2,
+    "items": [
+      {
+        "title": "Reflects repository constraints, not generic best practices.",
+        "details": [
+          "The answer should reference the real stack, runtime expectations, package managers, validation commands, and project conventions."
+        ]
+      },
+      {
+        "title": "Preserves architecture and contracts.",
+        "details": [
+          "The change should respect the current layering, public APIs, and user-visible behavior unless a deliberate contract change is requested."
+        ]
+      },
+      {
+        "title": "Avoids unnecessary complexity.",
+        "details": [
+          "The change should avoid ad hoc abstractions, avoidable waterfalls, and duplicated logic."
+        ]
+      }
+    ],
+    "quickSignals": [
+      "Uses the real validation and runtime constraints of the affected package.",
+      "Preserves behavior unless the task explicitly asks for a contract change.",
+      "Keeps agent instruction files and mirrored skills in sync."
+    ],
+    "redFlags": [
+      "Generic tutorial advice without package-specific constraints.",
+      "Hand-edited generated instruction files with no canonical spec update.",
+      "Large refactors that ignore existing boundaries without a clear reason."
+    ]
+  },
+  "skills": []
+}

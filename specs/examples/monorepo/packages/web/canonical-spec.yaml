@@ -1,0 +1,29 @@
+{
+  "extends": "../../base.yaml",
+  "project": {
+    "name": "Example Monorepo — web",
+    "summary": "Frontend package overlay. Inherits shared rules from base.yaml and adds web-specific runtime, validation, and review rules.",
+    "components": [
+      "Web application (frontend package in this monorepo)"
+    ]
+  },
+  "workspaceInstructions": {
+    "packageManagerRule": "Use pnpm for this package. Do not mix with npm or yarn lockfiles.",
+    "runtimeRule": "Node 20.x for tooling. Target evergreen browsers; no IE support.",
+    "sections": [
+      {
+        "title": "Web-specific rules",
+        "rules": [
+          "Keep components accessible by default: label interactive elements, preserve keyboard navigation, respect reduced-motion preferences.",
+          "Avoid client/server drift: server-rendered output and first client render must match to prevent hydration warnings.",
+          "Do not add third-party client-side trackers without explicit product approval."
+        ]
+      }
+    ],
+    "validation": [
+      "pnpm lint",
+      "pnpm typecheck",
+      "pnpm test"
+    ]
+  }
+}
