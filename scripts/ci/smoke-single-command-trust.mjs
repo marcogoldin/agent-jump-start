@@ -13,6 +13,7 @@ function runCli(cliPath, args, options = {}) {
     encoding: "utf8",
     cwd: options.cwd,
     env: options.env,
+    input: options.input,
   });
 }
 
@@ -45,14 +46,26 @@ function makeSmokeSkill(slug, version) {
 const tempDir = mkdtempSync(join(tmpdir(), "ajs-single-command-trust-"));
 
 try {
-  expectSuccess(runCli(sourceCli, ["init", "--target", tempDir]), "init");
+  const guidedInitInput = [
+    "go-service",
+    "Single-command trust smoke",
+    "End-to-end smoke coverage for one-command convergence.",
+    "y",
+    "y",
+    "y",
+    "n",
+    "",
+  ].join("\n");
+
+  expectSuccess(
+    runCli(sourceCli, ["init", "--target", tempDir], { input: guidedInitInput }),
+    "init",
+  );
 
   const embeddedCli = join(tempDir, "docs/agent-jump-start/scripts/agent-jump-start.mjs");
   const specPath = join(tempDir, "docs/agent-jump-start/canonical-spec.yaml");
 
   const initialSpec = JSON.parse(readFileSync(specPath, "utf8"));
-  initialSpec.project.name = "Single-command trust smoke";
-  initialSpec.project.summary = "End-to-end smoke coverage for one-command convergence.";
   initialSpec.workspaceInstructions.validation = ["npm test", "npm run lint"];
   initialSpec.skills = [makeSmokeSkill("smoke-before-rename", "1.0.0")];
   writeFileSync(specPath, `${JSON.stringify(initialSpec, null, 2)}\n`, "utf8");
