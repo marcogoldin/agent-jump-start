@@ -122,7 +122,7 @@ The canonical spec uses a strict YAML subset that is also valid JSON, so it stay
 | AGENTS.md fallback compatibility | `AGENT.md` |
 | Cursor | `.cursor/rules/agent-instructions.mdc`, `.cursor/rules/*.mdc` |
 | Windsurf | `.windsurf/rules/general.md`, `.windsurfrules` |
-| Cline | `.clinerules/general.md` |
+| Cline | `.clinerules/general.md`, `.clinerules` (legacy fallback) |
 | Roo Code | `.roo/rules/agent-instructions.md`, `.roorules` |
 | Continue.dev | `.continue/rules/agent-instructions.md` |
 | Aider | `CONVENTIONS.md` |
@@ -148,6 +148,7 @@ GEMINI.md
 .windsurf/rules/general.md
 .windsurfrules
 .clinerules/general.md
+.clinerules (legacy fallback when a root .clinerules file already exists)
 .roo/rules/agent-instructions.md
 .roorules
 .continue/rules/agent-instructions.md
@@ -168,6 +169,7 @@ AGENTS.md, AGENT.md, CLAUDE.md, GEMINI.md
 .windsurf/rules/**/*.{md,txt}
 .windsurfrules
 .clinerules/**/*.{md,txt}
+.clinerules
 .roo/rules/**/*.{md,txt}
 .roorules
 .amazonq/rules/**/*.md
@@ -399,6 +401,7 @@ GEMINI.md
 .windsurf/rules/general.md
 .windsurfrules
 .clinerules/general.md
+.clinerules
 .roo/rules/agent-instructions.md
 .roorules
 .continue/rules/agent-instructions.md
@@ -567,7 +570,7 @@ and reimplement the renderer elsewhere.
 npm test
 ```
 
-226 tests covering core workflows, sync command, doctor diagnostics, layered specs, layer-aware validation diagnostics, leaf-only writeback semantics, deep introspection, spec inference, overlay generation, assisted bootstrap, guided onboarding, project introspection, skill import/export, provenance lockfiles, `update-skills` refresh flows, progressive disclosure, high-level source adapters, semantic classification, mirror sync integrity, round-trip stability, provenance-safe intake replace, symlink resilience, expanded agent-file coverage, and single-command trust regressions.
+227 tests covering core workflows, sync command, doctor diagnostics, layered specs, layer-aware validation diagnostics, leaf-only writeback semantics, deep introspection, spec inference, overlay generation, assisted bootstrap, guided onboarding, project introspection, skill import/export, provenance lockfiles, `update-skills` refresh flows, progressive disclosure, high-level source adapters, semantic classification, mirror sync integrity, round-trip stability, provenance-safe intake replace, symlink resilience, expanded agent-file coverage, and single-command trust regressions.
 
 ## Contributing
 
