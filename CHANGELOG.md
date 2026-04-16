@@ -11,6 +11,8 @@ so versions are documented only where the history provides clear evidence.
 
 ## [Unreleased]
 
+## [1.16.0] - 2026-04-16
+
 ### Added
 
 - Added overwrite protection for `init`, `sync`, and `render`: pre-existing agent instruction files (`CLAUDE.md`, `AGENTS.md`, `.github/copilot-instructions.md`, Cursor/Windsurf/Cline/Roo/Continue/Aider targets) are now detected by the absence of the Agent Jump Start provenance marker and are never silently overwritten.
@@ -35,8 +37,6 @@ so versions are documented only where the history provides clear evidence.
 - Updated Cline projection behavior to prefer `.clinerules/general.md` while automatically falling back to legacy `.clinerules` when that root file already exists.
 - Updated refusal UX for unmanaged file collisions to include explicit absorb bridge guidance from `init`, `sync`, and `render`.
 - Updated vendored `init` file-copy surface so absorb modules and command handler are included in scaffolded toolkit copies.
-
-### Fixed
 
 ## [1.15.0] - 2026-04-14
 
