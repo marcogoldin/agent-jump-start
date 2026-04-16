@@ -28,6 +28,7 @@ so versions are documented only where the history provides clear evidence.
 - The generated-manifest list omits paths explicitly preserved via `--keep-existing`, so future `cleanStaleFiles` runs never delete operator-authored content.
 - Updated supported-agent metadata, CLI help output, review-checklist references, and README coverage docs to reflect the expanded propagation/discovery matrix.
 - Updated trust-preservation tests and smokes to assert guardrails on the newly supported agent file paths.
+- Updated Cline projection behavior to prefer `.clinerules/general.md` while automatically falling back to legacy `.clinerules` when that root file already exists.
 
 ### Fixed
 

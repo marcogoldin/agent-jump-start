@@ -5946,6 +5946,22 @@ function assertSentinelsIntact(tempDir) {
   assert.match(readFileSync(join(tempDir, "CONVENTIONS.md"), "utf8"), /SENTINEL-AIDER/);
 }
 
+test("render keeps legacy .clinerules path when a root .clinerules file already exists", () => {
+  const tempDir = makeTempDir();
+  try {
+    writeFileSync(join(tempDir, ".clinerules"), "SENTINEL-CLINE-LEGACY\n", "utf8");
+    const specPath = writeSpec(tempDir, makeMinimalSpec());
+    const result = runCli(["render", "--spec", specPath, "--target", tempDir, "--force"]);
+    expectSuccess(result);
+
+    assert.doesNotThrow(() => readFileSync(join(tempDir, ".clinerules"), "utf8"));
+    assert.ok(!existsSync(join(tempDir, ".clinerules/general.md")), "legacy .clinerules fallback should avoid creating a directory target");
+    assert.doesNotMatch(readFileSync(join(tempDir, ".clinerules"), "utf8"), /SENTINEL-CLINE-LEGACY/);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
 test("sync refuses to overwrite unmanaged pre-existing agent files in non-interactive mode", () => {
   const tempDir = makeTempDir();
   try {

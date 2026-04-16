@@ -162,7 +162,7 @@ Supported Agents:
   GitHub Agents        AGENTS.md, .agents/skills/*/SKILL.md
   Cursor               .cursor/rules/agent-instructions.mdc
   Windsurf (Codeium)   .windsurf/rules/*.md, .windsurfrules (legacy)
-  Cline                .clinerules/*.md
+  Cline                .clinerules/*.md, .clinerules (legacy)
   Roo Code             .roo/rules/agent-instructions.md, .roorules (legacy)
   Continue.dev         .continue/rules/agent-instructions.md
   Aider                CONVENTIONS.md
