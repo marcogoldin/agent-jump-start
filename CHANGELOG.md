@@ -11,6 +11,12 @@ so versions are documented only where the history provides clear evidence.
 
 ## [Unreleased]
 
+## [1.16.1] - 2026-04-16
+
+### Fixed
+
+- Fixed `TOOL_VERSION` constant that was not bumped in the 1.16.0 release, causing `--version` to report v1.15.0.
+
 ## [1.16.0] - 2026-04-16
 
 ### Added
