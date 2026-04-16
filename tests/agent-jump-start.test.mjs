@@ -2118,6 +2118,68 @@ A skill with all resource types.
 });
 
 // ===========================================================================
+// Dotfiles and empty files inside references/scripts/assets must be ignored
+// ===========================================================================
+
+test("import-skill ignores dotfiles and empty files inside references/scripts/assets directories", () => {
+  const tempDir = makeTempDir();
+  try {
+    const skillDir = join(tempDir, "external-dotfiles");
+    mkdirSync(join(skillDir, "references"), { recursive: true });
+    mkdirSync(join(skillDir, "scripts"), { recursive: true });
+    mkdirSync(join(skillDir, "assets"), { recursive: true });
+    writeFileSync(join(skillDir, "SKILL.md"), `---
+name: dotfile-skill
+description: A skill whose bundled directories contain tool dotfiles and empty placeholders.
+metadata:
+  version: "1.0.0"
+---
+
+# Dotfile Skill
+
+Packaged by a third-party tool that leaves hidden files and empty placeholders behind.
+
+## When to Use This Skill
+
+- Regression coverage for dotfile and empty-file filtering during import.
+`, "utf8");
+    // references: real file, dotfile, and empty placeholder
+    writeFileSync(join(skillDir, "references", "api.md"), "# API\nDocs.", "utf8");
+    writeFileSync(join(skillDir, "references", ".hidden.md"), "should be ignored", "utf8");
+    writeFileSync(join(skillDir, "references", "empty.md"), "", "utf8");
+    // scripts: real files, dotfiles, and an empty README placeholder
+    writeFileSync(join(skillDir, "scripts", "run.sh"), "#!/bin/bash\necho ok", "utf8");
+    writeFileSync(join(skillDir, "scripts", ".python-version"), "3.14\n", "utf8");
+    writeFileSync(join(skillDir, "scripts", ".DS_Store"), "", "utf8");
+    writeFileSync(join(skillDir, "scripts", "README.md"), "", "utf8");
+    // assets: real file, dotfile, and empty placeholder
+    writeFileSync(join(skillDir, "assets", "config.json"), '{"setting": true}', "utf8");
+    writeFileSync(join(skillDir, "assets", ".gitignore"), "*.log\n", "utf8");
+    writeFileSync(join(skillDir, "assets", "placeholder.json"), "", "utf8");
+
+    const specPath = join(tempDir, "spec.yaml");
+    expectSuccess(runCli(["bootstrap", "--base", "specs/base-spec.yaml", "--output", specPath]));
+    expectSuccess(runCli(["import-skill", "--spec", specPath, "--skill", skillDir]));
+
+    const spec = JSON.parse(readFileSync(specPath, "utf8"));
+    assert.equal(spec.skills.length, 1);
+    const skill = spec.skills[0];
+    assert.equal(skill.slug, "dotfile-skill");
+
+    const refNames = (skill.references ?? []).map((r) => r.name);
+    assert.deepEqual(refNames, ["api.md"]);
+
+    const scriptNames = (skill.scripts ?? []).map((s) => s.name);
+    assert.deepEqual(scriptNames, ["run.sh"]);
+
+    const assetNames = (skill.assets ?? []).map((a) => a.name);
+    assert.deepEqual(assetNames, ["config.json"]);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+// ===========================================================================
 // Export scripts/assets
 // ===========================================================================
 

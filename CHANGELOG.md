@@ -11,6 +11,17 @@ so versions are documented only where the history provides clear evidence.
 
 ## [Unreleased]
 
+## [1.17.0] - 2026-04-16
+
+### Fixed
+
+- Fixed `import-skill`, `add-skill`, `intake`, and related skill-import flows failing with `scripts[<n>].name must be a valid filename` when a skill's bundled `references/`, `scripts/`, or `assets/` directory contained dotfiles (e.g. `.python-version`, `.DS_Store`, `.gitignore`) left behind by third-party packaging tools such as `skillfish`.
+- Fixed the same flows failing with `<section>[<n>].content must be a non-empty string` when a bundled directory contained empty placeholder files (e.g. a 0-byte `README.md`). Dotfiles and empty files are now skipped silently at the read boundary; the spec validation contract remains strict and unchanged.
+
+### Added
+
+- Added regression coverage for dotfile and empty-file filtering during `import-skill` on directory skill sources (new test in `tests/agent-jump-start.test.mjs`).
+
 ## [1.16.1] - 2026-04-16
 
 ### Fixed
