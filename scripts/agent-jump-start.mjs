@@ -25,6 +25,7 @@ import { parseArgs } from "../lib/utils.mjs";
 import { handleInit, handleBootstrap } from "../lib/commands/setup.mjs";
 import { handleSync, handleRender, handleCheck } from "../lib/commands/pipeline.mjs";
 import { handleInfer, handleInferOverlay, handleDoctor } from "../lib/commands/infer.mjs";
+import { handleAbsorb } from "../lib/commands/absorb.mjs";
 import { handleValidateSkill, handleIntake, handleImportSkill, handleAddSkill, handleExportSkill, handleUpdateSkills } from "../lib/commands/skills.mjs";
 import { handleValidate, handleExportSchema, handleListAgents, handleListProfiles, handleDemoClean, handleDemoTree } from "../lib/commands/info.mjs";
 
@@ -40,6 +41,8 @@ Commands:
                  [--force | --backup | --keep-existing]
   bootstrap      --base <path> [--profile <path>] [--output <path>]
   sync           --spec <path> [--target <path>] [--force | --backup | --keep-existing]
+  absorb         --spec <path> [--target <path>] [--dry-run] [--output <path>]
+                 [--apply --selection <path>]
   infer          --target <path> [--output <path>] [--section <name>] [--format json|text]
   infer-overlay  --target <path> [--output <path>] [--base <path>] [--section <name>]
   doctor         --spec <path> [--suggest --target <path>]
@@ -88,6 +91,15 @@ Examples:
 
   node scripts/agent-jump-start.mjs sync \\
     --spec canonical-spec.yaml
+
+  node scripts/agent-jump-start.mjs absorb \\
+    --spec canonical-spec.yaml --target .
+
+  node scripts/agent-jump-start.mjs absorb \\
+    --spec canonical-spec.yaml --target . --dry-run --output absorb-proposal.json
+
+  node scripts/agent-jump-start.mjs absorb \\
+    --spec canonical-spec.yaml --target . --apply --selection absorb-selection.json
 
   node scripts/agent-jump-start.mjs infer \\
     --target .
@@ -181,6 +193,7 @@ const COMMAND_MAP = {
   "init":           (opts)        => handleInit(opts),
   "bootstrap":      (opts)        => handleBootstrap(opts),
   "sync":           (opts)        => handleSync(opts),
+  "absorb":         (opts)        => handleAbsorb(opts),
   "infer":          (opts)        => handleInfer(opts),
   "infer-overlay":  (opts)        => handleInferOverlay(opts),
   "doctor":         (opts)        => handleDoctor(opts),
