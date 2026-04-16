@@ -21,6 +21,10 @@ so versions are documented only where the history provides clear evidence.
 - Added P0 propagation support for additional mainstream instruction targets: `GEMINI.md`, `.amazonq/rules/general.md`, `.junie/AGENTS.md`, `.junie/guidelines.md`, `.github/instructions/general.instructions.md`, `.windsurf/rules/general.md`, `.clinerules/general.md`, `AGENT.md`, and `.roorules`.
 - Added broader discovery signal coverage for pre-existing instruction formats including `.github/instructions/**/*.instructions.md`, `.windsurf/rules/**/*.{md,txt}`, `.clinerules/**/*.{md,txt}`, `.amazonq/rules/**/*.md`, and Junie guideline directories.
 - Added validation/schema compatibility identifiers for new agent clients: `gemini-cli`, `amazon-q`, and `junie`.
+- Added `absorb` command for guided assimilation of pre-existing instruction files into canonical spec state, with interactive review and non-interactive `--dry-run` / `--apply --selection` modes.
+- Added new absorb pipeline modules: `lib/absorb/discovery.mjs`, `lib/absorb/extraction.mjs`, and `lib/absorb/proposal.mjs`.
+- Added dedicated absorb regression coverage (`tests/absorb.test.mjs`) and operator smoke (`scripts/ci/smoke-absorb.mjs`, `npm run smoke:absorb`).
+- Added shared agent target registry (`lib/agent-targets.mjs`) as single source of truth for display catalog, render targets, and discovery rules.
 
 ### Changed
 
@@ -29,6 +33,8 @@ so versions are documented only where the history provides clear evidence.
 - Updated supported-agent metadata, CLI help output, review-checklist references, and README coverage docs to reflect the expanded propagation/discovery matrix.
 - Updated trust-preservation tests and smokes to assert guardrails on the newly supported agent file paths.
 - Updated Cline projection behavior to prefer `.clinerules/general.md` while automatically falling back to legacy `.clinerules` when that root file already exists.
+- Updated refusal UX for unmanaged file collisions to include explicit absorb bridge guidance from `init`, `sync`, and `render`.
+- Updated vendored `init` file-copy surface so absorb modules and command handler are included in scaffolded toolkit copies.
 
 ### Fixed
 

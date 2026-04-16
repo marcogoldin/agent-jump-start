@@ -102,6 +102,7 @@ It works both in a real TTY and with piped stdin, so it can be tested or automat
 | Diagnose generic or incomplete spec content | `agent-jump-start doctor --spec docs/agent-jump-start/canonical-spec.yaml` |
 | Inspect repo evidence before editing the spec manually | `agent-jump-start infer --target .` |
 | Generate a schema-shaped overlay from repo evidence | `agent-jump-start infer-overlay --target . --base canonical-spec.yaml --output overlay.yaml` |
+| Absorb pre-existing agent instruction files into canonical spec | `agent-jump-start absorb --spec docs/agent-jump-start/canonical-spec.yaml --target .` |
 | Adopt skills already present in local agent folders | `agent-jump-start intake --spec docs/agent-jump-start/canonical-spec.yaml` |
 | Import one explicit skill package | `agent-jump-start import-skill --spec docs/agent-jump-start/canonical-spec.yaml --skill path/to/skill-directory` |
 
@@ -431,6 +432,32 @@ Flags accepted by `init`, `sync`, and `render`:
 | `--backup` | Copy each pre-existing file to `<file>.ajs-backup-<timestamp>` before overwriting |
 | `--keep-existing` | Leave pre-existing files untouched; skip the rendered version and exclude it from the manifest |
 
+Recommended convergence flow for hybrid repositories:
+
+```bash
+agent-jump-start init --target . --non-interactive --keep-existing
+agent-jump-start absorb --spec docs/agent-jump-start/canonical-spec.yaml --target .
+agent-jump-start sync --spec docs/agent-jump-start/canonical-spec.yaml --target . --force
+```
+
+`absorb` updates only the canonical spec (or layered leaf) using reviewed extraction output from unmanaged pre-existing agent files. It never overwrites instruction targets directly; `sync` remains the explicit propagation step.
+
+If the canonical spec does not exist yet, start with:
+
+```bash
+agent-jump-start init --target . --non-interactive --keep-existing
+```
+
+Then continue with `absorb` and `sync --force` as shown above.
+
+`absorb` execution modes:
+
+| Mode | Usage | Behavior |
+|---|---|---|
+| Interactive TTY | `agent-jump-start absorb --spec <path> --target <path>` | Guided per-source review, preview, confirm write |
+| CI preview | `agent-jump-start absorb --spec <path> --target <path> --dry-run --output absorb-proposal.yaml` | Writes deterministic proposal artifact, no spec write |
+| CI apply | `agent-jump-start absorb --spec <path> --target <path> --apply --selection absorb-selection.yaml` | Applies explicit reviewed decisions only |
+
 ### Removing Only Tool-Managed Outputs
 
 Every path listed in `docs/agent-jump-start/generated-manifest.json` was authored by Agent Jump Start. To reset the tool without touching operator-authored files, delete exactly those paths — anything not in the manifest (including anything you preserved with `--keep-existing`) will stay untouched.
@@ -504,6 +531,7 @@ agent-jump-start bootstrap --base <path> [--profile <path>] [--output <path>]
 agent-jump-start sync --spec <path> [--target <path>]
 agent-jump-start infer --target <path> [--output <path>] [--section <name>] [--format json|text]
 agent-jump-start infer-overlay --target <path> [--output <path>] [--base <path>] [--section <name>]
+agent-jump-start absorb --spec <path> [--target <path>] [--dry-run] [--output <path>] [--apply --selection <path>]
 agent-jump-start doctor --spec <path> [--suggest --target <path>]
 agent-jump-start render --spec <path> [--target <path>] [--clean]
 agent-jump-start check --spec <path> [--target <path>]
@@ -548,6 +576,7 @@ know which file to open.
 - `intake --import --replace` is provenance-safe: skills tracked with upstream provenance (`github`, `skills`, `skillfish`) are never downgraded to `local-directory`. Only locally tracked managed skills can be replaced via intake.
 - Broken symlinks in local skill directories are silently skipped during discovery and do not crash sync.
 - Gemini, Amazon Q, Junie, Continue, Aider, Windsurf, Cline, and Roo Code do not receive native skill packages; they receive mirrored workspace guidance plus inline skill summaries.
+- `absorb` v1 intentionally targets only `workspaceInstructions.sections` and `workspaceInstructions.validation`; checklist/summary absorption is deferred.
 - Remote skill import supports GitHub sources plus `skills` and `skillfish` adapters.
 - Skills installed directly by third-party CLIs into `./.agents/skills/` remain unmanaged until they are imported into the canonical spec.
 - Direct `npx @marcogoldin/agent-jump-start@latest ...` execution may not resolve the published bin consistently across npm environments; global install and vendored usage are the most reliable paths.
@@ -570,7 +599,7 @@ and reimplement the renderer elsewhere.
 npm test
 ```
 
-227 tests covering core workflows, sync command, doctor diagnostics, layered specs, layer-aware validation diagnostics, leaf-only writeback semantics, deep introspection, spec inference, overlay generation, assisted bootstrap, guided onboarding, project introspection, skill import/export, provenance lockfiles, `update-skills` refresh flows, progressive disclosure, high-level source adapters, semantic classification, mirror sync integrity, round-trip stability, provenance-safe intake replace, symlink resilience, expanded agent-file coverage, and single-command trust regressions.
+236 tests covering core workflows, sync command, doctor diagnostics, layered specs, layer-aware validation diagnostics, leaf-only writeback semantics, deep introspection, spec inference, overlay generation, assisted bootstrap, guided onboarding, project introspection, skill import/export, provenance lockfiles, `update-skills` refresh flows, progressive disclosure, high-level source adapters, semantic classification, mirror sync integrity, round-trip stability, provenance-safe intake replace, symlink resilience, absorb-driven hybrid-repo convergence, expanded agent-file coverage, and single-command trust regressions.
 
 ## Contributing
 

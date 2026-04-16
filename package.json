@@ -17,6 +17,7 @@
     "test": "node --test",
     "smoke:p0": "node scripts/ci/smoke-single-command-trust.mjs",
     "smoke:preserve": "node scripts/ci/smoke-preserve-unmanaged-files.mjs",
+    "smoke:absorb": "node scripts/ci/smoke-absorb.mjs",
     "export-schema": "node scripts/agent-jump-start.mjs export-schema",
     "list-agents": "node scripts/agent-jump-start.mjs list-agents",
     "list-profiles": "node scripts/agent-jump-start.mjs list-profiles"
