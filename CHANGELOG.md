@@ -11,6 +11,18 @@ so versions are documented only where the history provides clear evidence.
 
 ## [Unreleased]
 
+## [1.17.1] - 2026-04-16
+
+### Fixed
+
+- Fixed repeated `sync` prompts for imported skill package files under `references/`, `scripts/`, and `assets/`: once a prior render has recorded those paths in `docs/agent-jump-start/generated-manifest.json`, subsequent sync runs now treat them as Agent Jump Start-managed even though the file payload itself cannot always embed an inline provenance marker.
+- Fixed interactive overwrite protection UX so real unmanaged collisions are prompted per conflict group instead of per file: mirrored skill-package paths are grouped by skill slug, while other conflicts are grouped by root such as `.github`, `.claude`, `.agents`, or the workspace root.
+
+### Added
+
+- Added regression coverage for repeated `import-skill -> sync -> sync` runs so mirrored skill package files remain idempotent without `--force`.
+- Added regression coverage for grouped conflict prompting so one interactive decision now applies to an entire skill-package mirror set or root-level target group.
+
 ## [1.17.0] - 2026-04-16
 
 ### Fixed

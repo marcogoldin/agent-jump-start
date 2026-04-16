@@ -1347,6 +1347,44 @@ Skill for round-trip testing.
   }
 });
 
+test("import-skill sync stays idempotent for manifest-tracked references, scripts, and assets", () => {
+  const tempDir = makeTempDir();
+  try {
+    const skillDir = join(tempDir, "ext-idempotent");
+    mkdirSync(join(skillDir, "references"), { recursive: true });
+    mkdirSync(join(skillDir, "scripts"), { recursive: true });
+    mkdirSync(join(skillDir, "assets"), { recursive: true });
+    writeFileSync(join(skillDir, "SKILL.md"), `---
+name: sync-idempotent
+description: Skill package used to verify repeated sync runs.
+metadata:
+  version: "1.0.0"
+---
+
+# Sync Idempotent
+
+## When to Use This Skill
+
+- Regression coverage for repeated sync runs after import.
+`, "utf8");
+    writeFileSync(join(skillDir, "references", "guide.md"), "# Guide\nReference content.\n", "utf8");
+    writeFileSync(join(skillDir, "scripts", "setup.sh"), "#!/bin/bash\necho setup\n", "utf8");
+    writeFileSync(join(skillDir, "assets", "template.json"), "{\"template\":true}\n", "utf8");
+
+    const specPath = join(tempDir, "spec.json");
+    writeFileSync(specPath, `${JSON.stringify(makeMinimalSpec({ skills: [] }), null, 2)}\n`, "utf8");
+
+    expectSuccess(runCli(["import-skill", "--spec", specPath, "--skill", skillDir]));
+    expectSuccess(runCli(["sync", "--spec", specPath, "--target", tempDir]));
+    const secondSync = runCli(["sync", "--spec", specPath, "--target", tempDir]);
+
+    expectSuccess(secondSync);
+    assert.doesNotMatch(secondSync.stdout + secondSync.stderr, /Refused to overwrite pre-existing files/);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
 // ===========================================================================
 // Export -> re-import round-trip
 // ===========================================================================
@@ -5876,7 +5914,7 @@ import {
   classifyPreWriteCollisions,
   applyWriteDecisions,
 } from "../lib/files.mjs";
-import { resolveConflictPolicyFromOptions } from "../lib/safe-write.mjs";
+import { groupConflictPaths, resolveConflictPolicyFromOptions, safeWriteGeneratedFiles } from "../lib/safe-write.mjs";
 
 test("classifyExistingFile distinguishes absent, managed, unmanaged, and not-a-file", () => {
   const tempDir = makeTempDir();
@@ -5915,6 +5953,70 @@ test("classifyPreWriteCollisions buckets paths by ownership", () => {
   }
 });
 
+test("classifyPreWriteCollisions treats manifest-tracked skill package files as managed", () => {
+  const tempDir = makeTempDir();
+  try {
+    mkdirSync(join(tempDir, "docs/agent-jump-start"), { recursive: true });
+    writeFileSync(
+      join(tempDir, "docs/agent-jump-start/generated-manifest.json"),
+      JSON.stringify({
+        generatedBy: "Agent Jump Start v1.0.0",
+        files: [".agents/skills/example/references/guide.md"],
+      }, null, 2),
+      "utf8",
+    );
+    mkdirSync(join(tempDir, ".agents/skills/example/references"), { recursive: true });
+    writeFileSync(join(tempDir, ".agents/skills/example/references/guide.md"), "# Guide\n", "utf8");
+
+    const result = classifyPreWriteCollisions({
+      ".agents/skills/example/references/guide.md": "# Guide\nUpdated",
+    }, tempDir);
+
+    assert.deepEqual(result.managed, [".agents/skills/example/references/guide.md"]);
+    assert.deepEqual(result.unmanaged, []);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("groupConflictPaths groups mirrored skill conflicts by skill and non-skill paths by root", () => {
+  const groups = groupConflictPaths([
+    ".github/skills/debugging-wizard/references/quick-fixes.md",
+    ".claude/skills/debugging-wizard/references/quick-fixes.md",
+    ".agents/skills/debugging-wizard/references/quick-fixes.md",
+    ".github/copilot-instructions.md",
+    "CLAUDE.md",
+  ]);
+
+  assert.deepEqual(groups, [
+    {
+      kind: "skill",
+      key: "skill:debugging-wizard",
+      label: "debugging-wizard",
+      roots: [".agents", ".claude", ".github"],
+      paths: [
+        ".agents/skills/debugging-wizard/references/quick-fixes.md",
+        ".claude/skills/debugging-wizard/references/quick-fixes.md",
+        ".github/skills/debugging-wizard/references/quick-fixes.md",
+      ],
+    },
+    {
+      kind: "root",
+      key: "root:.github",
+      label: ".github",
+      roots: [".github"],
+      paths: [".github/copilot-instructions.md"],
+    },
+    {
+      kind: "root",
+      key: "root:workspace root",
+      label: "workspace root",
+      roots: ["workspace root"],
+      paths: ["CLAUDE.md"],
+    },
+  ]);
+});
+
 test("applyWriteDecisions refuses to write when an unmanaged path has no decision", () => {
   const tempDir = makeTempDir();
   try {
@@ -5944,6 +6046,49 @@ test("applyWriteDecisions keep skips the write and backup-then-overwrite creates
     assert.equal(readFileSync(join(tempDir, "backup.md"), "utf8"), "new-backup");
     assert.equal(readFileSync(join(tempDir, "backup.md.ajs-backup-fixed-stamp"), "utf8"), "# original\n");
     assert.deepEqual(result.backedUp.map((e) => e.relativePath), ["backup.md"]);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("safeWriteGeneratedFiles prompts once per conflict group in interactive mode", async () => {
+  const tempDir = makeTempDir();
+  try {
+    mkdirSync(join(tempDir, ".github/skills/debugging-wizard/references"), { recursive: true });
+    mkdirSync(join(tempDir, ".claude/skills/debugging-wizard/references"), { recursive: true });
+    mkdirSync(join(tempDir, ".agents/skills/debugging-wizard/references"), { recursive: true });
+    mkdirSync(join(tempDir, ".github"), { recursive: true });
+
+    writeFileSync(join(tempDir, ".github/skills/debugging-wizard/references/quick-fixes.md"), "existing-gh\n", "utf8");
+    writeFileSync(join(tempDir, ".claude/skills/debugging-wizard/references/quick-fixes.md"), "existing-claude\n", "utf8");
+    writeFileSync(join(tempDir, ".agents/skills/debugging-wizard/references/quick-fixes.md"), "existing-agents\n", "utf8");
+    writeFileSync(join(tempDir, ".github/copilot-instructions.md"), "existing-copilot\n", "utf8");
+
+    const prompted = [];
+    const result = await safeWriteGeneratedFiles({
+      generatedFiles: {
+        ".github/skills/debugging-wizard/references/quick-fixes.md": "new-gh\n",
+        ".claude/skills/debugging-wizard/references/quick-fixes.md": "new-claude\n",
+        ".agents/skills/debugging-wizard/references/quick-fixes.md": "new-agents\n",
+        ".github/copilot-instructions.md": "new-copilot\n",
+      },
+      targetRoot: tempDir,
+      promptFn: async (group) => {
+        prompted.push(`${group.kind}:${group.label}:${group.paths.length}`);
+        return group.kind === "skill" ? "overwrite" : "keep";
+      },
+      isInteractiveFn: () => true,
+    });
+
+    assert.deepEqual(prompted, [
+      "skill:debugging-wizard:3",
+      "root:.github:1",
+    ]);
+    assert.equal(readFileSync(join(tempDir, ".github/skills/debugging-wizard/references/quick-fixes.md"), "utf8"), "new-gh\n");
+    assert.equal(readFileSync(join(tempDir, ".claude/skills/debugging-wizard/references/quick-fixes.md"), "utf8"), "new-claude\n");
+    assert.equal(readFileSync(join(tempDir, ".agents/skills/debugging-wizard/references/quick-fixes.md"), "utf8"), "new-agents\n");
+    assert.equal(readFileSync(join(tempDir, ".github/copilot-instructions.md"), "utf8"), "existing-copilot\n");
+    assert.deepEqual(result.kept, [".github/copilot-instructions.md"]);
   } finally {
     cleanupTempDir(tempDir);
   }

@@ -421,8 +421,8 @@ If your repo already contains hand-written `CLAUDE.md`, `AGENTS.md`, `AGENT.md`,
 
 On first run, `init`, `sync`, and `render` detect unmanaged pre-existing files and behave as follows:
 
-- **Interactive TTY** — the CLI prompts per file with three options: keep, overwrite, or backup-then-overwrite.
-- **Non-interactive (CI, piped input, scripts)** — the CLI refuses the run and exits non-zero with a message naming each conflicting file. Choose one of the flags below and re-run.
+- **Interactive TTY** — the CLI prompts per conflict group, not per file. Mirrored skill-package collisions are grouped by skill slug; other collisions are grouped by root (`.github`, `.claude`, `.agents`, workspace root, and so on). Each group offers the same three choices: keep, overwrite, or backup-then-overwrite.
+- **Non-interactive (CI, piped input, scripts)** — the CLI refuses the run and exits non-zero with a grouped summary of the conflicts. Choose one of the flags below and re-run.
 
 Flags accepted by `init`, `sync`, and `render`:
 
