@@ -37,12 +37,14 @@ function usage() {
 
 Commands:
   init           [--profile <path>] [--target <path>] [--non-interactive] [--overwrite]
+                 [--force | --backup | --keep-existing]
   bootstrap      --base <path> [--profile <path>] [--output <path>]
-  sync           --spec <path> [--target <path>]
+  sync           --spec <path> [--target <path>] [--force | --backup | --keep-existing]
   infer          --target <path> [--output <path>] [--section <name>] [--format json|text]
   infer-overlay  --target <path> [--output <path>] [--base <path>] [--section <name>]
   doctor         --spec <path> [--suggest --target <path>]
   render         --spec <path> [--target <path>] [--clean]
+                 [--force | --backup | --keep-existing]
   check          --spec <path> [--target <path>]
   validate       --spec <path>
   validate-skill <path>   (SKILL.md file or skill directory)
@@ -60,6 +62,17 @@ Options:
   --version   Show version number
   --non-interactive  Use the classic non-guided init flow for CI or scripting
   --overwrite        Replace an existing canonical spec without prompting
+
+Overwrite protection (init, sync, render):
+  Pre-existing agent instruction files (CLAUDE.md, AGENTS.md,
+  GEMINI.md, .github/copilot-instructions.md, .github/instructions/*.instructions.md,
+  Cursor/Windsurf/Cline/Roo/Amazon Q/Junie rules, …) are detected by the
+  absence of the Agent Jump Start provenance marker and are never silently
+  overwritten. Choose one of the following on a per-invocation basis:
+  --force            Overwrite pre-existing operator-authored files
+  --backup           Save a timestamped .ajs-backup-* copy, then overwrite
+  --keep-existing    Leave pre-existing files untouched and skip those targets
+  (Interactive TTY sessions will prompt per file when none of the flags are set.)
 
 Examples:
   npx @marcogoldin/agent-jump-start@latest init \\
@@ -143,11 +156,14 @@ Examples:
 Supported Agents:
   Claude Code          CLAUDE.md, .claude/skills/*/SKILL.md
   GitHub Copilot       .github/copilot-instructions.md, .github/skills/*/SKILL.md
+  Gemini CLI           GEMINI.md
+  Amazon Q Developer   .amazonq/rules/*.md
+  JetBrains Junie      .junie/AGENTS.md, .junie/guidelines.md
   GitHub Agents        AGENTS.md, .agents/skills/*/SKILL.md
   Cursor               .cursor/rules/agent-instructions.mdc
-  Windsurf (Codeium)   .windsurfrules
-  Cline                .clinerules
-  Roo Code             .roo/rules/agent-instructions.md
+  Windsurf (Codeium)   .windsurf/rules/*.md, .windsurfrules (legacy)
+  Cline                .clinerules/*.md
+  Roo Code             .roo/rules/agent-instructions.md, .roorules (legacy)
   Continue.dev         .continue/rules/agent-instructions.md
   Aider                CONVENTIONS.md
 `);

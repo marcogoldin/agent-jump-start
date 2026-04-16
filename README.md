@@ -1,6 +1,6 @@
 # Agent Jump Start
 
-One canonical spec. Nine agent ecosystems. One `sync` command you can trust.
+One canonical spec. Twelve agent ecosystems. One `sync` command you can trust.
 
 Agent Jump Start lets you define project rules, review guidance, and reusable skills once, then render the correct instruction files for every supported coding agent.
 
@@ -115,11 +115,15 @@ The canonical spec uses a strict YAML subset that is also valid JSON, so it stay
 |---|---|
 | Claude Code | `CLAUDE.md`, `.claude/skills/*/SKILL.md` |
 | GitHub Copilot | `.github/copilot-instructions.md`, `.github/skills/*/SKILL.md` |
+| Gemini CLI | `GEMINI.md` |
+| Amazon Q Developer | `.amazonq/rules/general.md` |
+| JetBrains Junie | `.junie/AGENTS.md`, `.junie/guidelines.md` |
 | GitHub Agents | `AGENTS.md`, `.agents/skills/*/SKILL.md` |
+| AGENTS.md fallback compatibility | `AGENT.md` |
 | Cursor | `.cursor/rules/agent-instructions.mdc`, `.cursor/rules/*.mdc` |
-| Windsurf | `.windsurfrules` |
-| Cline | `.clinerules` |
-| Roo Code | `.roo/rules/agent-instructions.md` |
+| Windsurf | `.windsurf/rules/general.md`, `.windsurfrules` |
+| Cline | `.clinerules/general.md` |
+| Roo Code | `.roo/rules/agent-instructions.md`, `.roorules` |
 | Continue.dev | `.continue/rules/agent-instructions.md` |
 | Aider | `CONVENTIONS.md` |
 
@@ -127,6 +131,51 @@ The canonical spec uses a strict YAML subset that is also valid JSON, so it stay
 - `.agents/skills/` is the canonical skill package tree.
 - `.claude/skills/` and `.github/skills/` are byte-identical mirrors of the canonical packages.
 - Agents without native skill-package support receive mirrored workspace instructions plus inline skill summaries.
+
+## Agent File Coverage
+
+### Propagation Coverage (sync/render managed outputs)
+
+```text
+.agents/AGENTS.md
+AGENTS.md
+AGENT.md
+CLAUDE.md
+GEMINI.md
+.github/copilot-instructions.md
+.github/instructions/general.instructions.md
+.cursor/rules/agent-instructions.mdc
+.windsurf/rules/general.md
+.windsurfrules
+.clinerules/general.md
+.roo/rules/agent-instructions.md
+.roorules
+.continue/rules/agent-instructions.md
+.amazonq/rules/general.md
+.junie/AGENTS.md
+.junie/guidelines.md
+CONVENTIONS.md
+```
+
+### Discovery Coverage (pre-existing files recognized)
+
+```text
+AGENTS.md, AGENT.md, CLAUDE.md, GEMINI.md
+.github/copilot-instructions.md
+.github/instructions/**/*.instructions.md
+.cursor/rules/**/*.mdc
+.continue/rules/**/*.{md,txt}
+.windsurf/rules/**/*.{md,txt}
+.windsurfrules
+.clinerules/**/*.{md,txt}
+.roo/rules/**/*.{md,txt}
+.roorules
+.amazonq/rules/**/*.md
+.junie/AGENTS.md
+.junie/guidelines.md
+.junie/guidelines/**/*.md
+CONVENTIONS.md
+```
 
 ## Requirements
 
@@ -338,21 +387,50 @@ Typical render output:
 .agents/skills/<slug>/scripts/*
 .agents/skills/<slug>/assets/*
 AGENTS.md
+AGENT.md
 CLAUDE.md
+GEMINI.md
 .claude/skills/<slug>/SKILL.md
 .github/copilot-instructions.md
+.github/instructions/general.instructions.md
 .github/skills/<slug>/SKILL.md
 .cursor/rules/agent-instructions.mdc
 .cursor/rules/<slug>.mdc
+.windsurf/rules/general.md
 .windsurfrules
-.clinerules
+.clinerules/general.md
 .roo/rules/agent-instructions.md
+.roorules
 .continue/rules/agent-instructions.md
+.amazonq/rules/general.md
+.junie/AGENTS.md
+.junie/guidelines.md
 CONVENTIONS.md
 docs/agent-review-checklist.md
 docs/agent-jump-start/generated-manifest.json
 docs/agent-jump-start/agent-jump-start.lock.json
 ```
+
+## Installing Into A Repo That Already Has Agent Files
+
+If your repo already contains hand-written `CLAUDE.md`, `AGENTS.md`, `AGENT.md`, `GEMINI.md`, `.github/copilot-instructions.md`, `.github/instructions/*.instructions.md`, Cursor/Windsurf/Cline/Roo/Continue/Amazon Q/Junie rules, or `CONVENTIONS.md`, Agent Jump Start will **never** silently overwrite them. A file is only treated as tool-managed if it carries the `Agent Jump Start` provenance marker embedded in every rendered artifact.
+
+On first run, `init`, `sync`, and `render` detect unmanaged pre-existing files and behave as follows:
+
+- **Interactive TTY** — the CLI prompts per file with three options: keep, overwrite, or backup-then-overwrite.
+- **Non-interactive (CI, piped input, scripts)** — the CLI refuses the run and exits non-zero with a message naming each conflicting file. Choose one of the flags below and re-run.
+
+Flags accepted by `init`, `sync`, and `render`:
+
+| Flag | Effect |
+|---|---|
+| `--force` | Overwrite pre-existing operator-authored files with the rendered versions |
+| `--backup` | Copy each pre-existing file to `<file>.ajs-backup-<timestamp>` before overwriting |
+| `--keep-existing` | Leave pre-existing files untouched; skip the rendered version and exclude it from the manifest |
+
+### Removing Only Tool-Managed Outputs
+
+Every path listed in `docs/agent-jump-start/generated-manifest.json` was authored by Agent Jump Start. To reset the tool without touching operator-authored files, delete exactly those paths — anything not in the manifest (including anything you preserved with `--keep-existing`) will stay untouched.
 
 ## Architecture In One Glance
 
@@ -361,7 +439,7 @@ docs/agent-jump-start/agent-jump-start.lock.json
 | `docs/agent-jump-start/canonical-spec.yaml` | Canonical project memory: rules, validation, review checklist, skills |
 | `.agents/AGENTS.md` | Canonical workspace instruction file |
 | `.agents/skills/<slug>/` | Canonical skill packages |
-| Agent-specific mirrors | Projections for Claude, Copilot, Cursor, Windsurf, Cline, Roo, Continue, and Aider |
+| Agent-specific mirrors | Projections for Claude, Copilot, Gemini, Amazon Q, Junie, Cursor, Windsurf, Cline, Roo, Continue, and Aider |
 | `docs/agent-jump-start/generated-manifest.json` | Tracks managed outputs for cleanup and drift detection |
 | `docs/agent-jump-start/agent-jump-start.lock.json` | Tracks imported skill provenance and refreshable sources |
 
@@ -466,7 +544,7 @@ know which file to open.
 - `infer-overlay --base <spec>` produces a layered overlay that can be validated directly. Without `--base`, the command emits a partial overlay fragment intended for manual merge or further editing.
 - `intake --import --replace` is provenance-safe: skills tracked with upstream provenance (`github`, `skills`, `skillfish`) are never downgraded to `local-directory`. Only locally tracked managed skills can be replaced via intake.
 - Broken symlinks in local skill directories are silently skipped during discovery and do not crash sync.
-- Continue, Aider, Windsurf, Cline, and Roo Code do not receive native skill packages; they receive mirrored workspace guidance plus inline skill summaries.
+- Gemini, Amazon Q, Junie, Continue, Aider, Windsurf, Cline, and Roo Code do not receive native skill packages; they receive mirrored workspace guidance plus inline skill summaries.
 - Remote skill import supports GitHub sources plus `skills` and `skillfish` adapters.
 - Skills installed directly by third-party CLIs into `./.agents/skills/` remain unmanaged until they are imported into the canonical spec.
 - Direct `npx @marcogoldin/agent-jump-start@latest ...` execution may not resolve the published bin consistently across npm environments; global install and vendored usage are the most reliable paths.
@@ -489,7 +567,7 @@ and reimplement the renderer elsewhere.
 npm test
 ```
 
-213 tests covering core workflows, sync command, doctor diagnostics, layered specs, layer-aware validation diagnostics, leaf-only writeback semantics, deep introspection, spec inference, overlay generation, assisted bootstrap, guided onboarding, project introspection, skill import/export, provenance lockfiles, `update-skills` refresh flows, progressive disclosure, high-level source adapters, semantic classification, mirror sync integrity, round-trip stability, provenance-safe intake replace, symlink resilience, and single-command trust regressions.
+226 tests covering core workflows, sync command, doctor diagnostics, layered specs, layer-aware validation diagnostics, leaf-only writeback semantics, deep introspection, spec inference, overlay generation, assisted bootstrap, guided onboarding, project introspection, skill import/export, provenance lockfiles, `update-skills` refresh flows, progressive disclosure, high-level source adapters, semantic classification, mirror sync integrity, round-trip stability, provenance-safe intake replace, symlink resilience, expanded agent-file coverage, and single-command trust regressions.
 
 ## Contributing
 
