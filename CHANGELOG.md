@@ -13,7 +13,21 @@ so versions are documented only where the history provides clear evidence.
 
 ### Added
 
+- Added overwrite protection for `init`, `sync`, and `render`: pre-existing agent instruction files (`CLAUDE.md`, `AGENTS.md`, `.github/copilot-instructions.md`, Cursor/Windsurf/Cline/Roo/Continue/Aider targets) are now detected by the absence of the Agent Jump Start provenance marker and are never silently overwritten.
+- Added `--force`, `--backup`, and `--keep-existing` flags to `init`, `sync`, and `render` so operators can explicitly opt in to overwriting, to a timestamped `.ajs-backup-<stamp>` copy before overwrite, or to preserving their own files and skipping those targets.
+- Added interactive per-file prompts (keep / overwrite / backup-then-overwrite) for TTY sessions when none of the conflict flags are set.
+- Added `generatedBy` stamp to the generated manifest so provenance detection works on JSON artifacts as well as Markdown/MDC outputs.
+- Added unit coverage for ownership classification, decision application, and flag parsing, plus a dedicated operator-style smoke at `scripts/ci/smoke-preserve-unmanaged-files.mjs` (`npm run smoke:preserve`).
+- Added P0 propagation support for additional mainstream instruction targets: `GEMINI.md`, `.amazonq/rules/general.md`, `.junie/AGENTS.md`, `.junie/guidelines.md`, `.github/instructions/general.instructions.md`, `.windsurf/rules/general.md`, `.clinerules/general.md`, `AGENT.md`, and `.roorules`.
+- Added broader discovery signal coverage for pre-existing instruction formats including `.github/instructions/**/*.instructions.md`, `.windsurf/rules/**/*.{md,txt}`, `.clinerules/**/*.{md,txt}`, `.amazonq/rules/**/*.md`, and Junie guideline directories.
+- Added validation/schema compatibility identifiers for new agent clients: `gemini-cli`, `amazon-q`, and `junie`.
+
 ### Changed
+
+- Non-interactive `init`, `sync`, and `render` now fail closed with an actionable message when unmanaged pre-existing files are present, rather than silently rewriting them.
+- The generated-manifest list omits paths explicitly preserved via `--keep-existing`, so future `cleanStaleFiles` runs never delete operator-authored content.
+- Updated supported-agent metadata, CLI help output, review-checklist references, and README coverage docs to reflect the expanded propagation/discovery matrix.
+- Updated trust-preservation tests and smokes to assert guardrails on the newly supported agent file paths.
 
 ### Fixed
 

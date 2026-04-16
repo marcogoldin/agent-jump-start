@@ -1,7 +1,7 @@
 {
   "name": "@marcogoldin/agent-jump-start",
   "version": "1.15.0",
-  "description": "Portable starter kit for keeping AI coding assistant instructions synchronized across 9 agent ecosystems from one canonical specification.",
+  "description": "Portable starter kit for keeping AI coding assistant instructions synchronized across 12 agent ecosystems from one canonical specification.",
   "type": "module",
   "main": "scripts/agent-jump-start.mjs",
   "bin": {
@@ -16,6 +16,7 @@
     "validate": "node scripts/agent-jump-start.mjs validate --spec canonical-spec.yaml",
     "test": "node --test",
     "smoke:p0": "node scripts/ci/smoke-single-command-trust.mjs",
+    "smoke:preserve": "node scripts/ci/smoke-preserve-unmanaged-files.mjs",
     "export-schema": "node scripts/agent-jump-start.mjs export-schema",
     "list-agents": "node scripts/agent-jump-start.mjs list-agents",
     "list-profiles": "node scripts/agent-jump-start.mjs list-profiles"
@@ -25,6 +26,8 @@
     "coding-assistant",
     "claude",
     "copilot",
+    "gemini",
+    "amazon-q",
     "cursor",
     "windsurf",
     "cline",
