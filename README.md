@@ -1,28 +1,31 @@
 # Agent Jump Start
 
-One canonical spec. Twelve agent ecosystems. One `sync` command you can trust.
+A single canonical spec for project instructions, review guidance, and reusable skills.
 
-Agent Jump Start lets you define project rules, review guidance, and reusable skills once, then render the correct instruction files for every supported coding agent.
+Agent Jump Start renders the right files for twelve coding-agent ecosystems from one source of truth, keeps them synchronized with one maintenance command, and protects pre-existing operator-authored files from accidental overwrite.
 
-Zero runtime dependencies. Only Node.js built-ins.
+It runs on Node.js built-ins only. No runtime dependencies are required.
 
-## Why Teams Use It
+## What It Solves
 
-Most teams using multiple AI coding tools drift into one of two bad states:
+Teams usually hit one of these problems:
 
-- every agent has different instructions
-- nobody trusts generated instruction files because they need manual cleanup or second runs
+- the same repository has different instructions for different agents
+- generated files drift and stop being trusted
+- existing repositories already contain hand-written agent files, so first-run adoption is risky
+- shared skills exist in different folders with no clear canonical owner
 
-Agent Jump Start gives you a single source of truth:
+Agent Jump Start gives the repository one explicit memory model:
 
 - one canonical spec
 - one canonical skill tree
-- one `sync` command for local maintenance
+- one `sync` command for maintenance
 - one `check` command for CI drift detection
+- one clear overwrite policy for existing repos
 
 ## Start Here
 
-Install it:
+Install globally:
 
 ```bash
 npm install -g @marcogoldin/agent-jump-start
@@ -34,10 +37,10 @@ Initialize a repository:
 agent-jump-start init --target .
 ```
 
-Review the generated spec, then sync all agent outputs:
+Review the generated canonical spec, then synchronize managed files:
 
 ```bash
-agent-jump-start sync --spec docs/agent-jump-start/canonical-spec.yaml
+agent-jump-start sync --spec docs/agent-jump-start/canonical-spec.yaml --target .
 ```
 
 Use `check` in CI:
@@ -46,14 +49,14 @@ Use `check` in CI:
 agent-jump-start check --spec docs/agent-jump-start/canonical-spec.yaml --target .
 ```
 
-That is the core product flow:
+That is the core operating model:
 
 - `init` creates the framework and drafts the canonical spec
-- `sync` keeps every supported agent output aligned
-- `check` tells CI when generated files drifted
-- `doctor` helps when the spec still looks generic
+- `sync` renders managed outputs, cleans stale files, and verifies convergence
+- `check` fails when generated files drift from the canonical spec
+- `doctor` helps when a first draft is still too generic
 
-## What `init` Does
+## First-Run Experience
 
 `init` starts guided onboarding by default.
 
@@ -61,156 +64,228 @@ That is the core product flow:
 agent-jump-start init --target .
 ```
 
-If you need the classic placeholder bootstrap for automation:
+For automation and CI-friendly bootstrap:
 
 ```bash
 agent-jump-start init --non-interactive --target .
 ```
 
-During onboarding, Agent Jump Start can inspect repository signals such as manifests, scripts, lockfiles, CI workflows, linter configs, Python tooling, Docker files, and local conventions. In empty repositories it offers curated starter presets and stack aliases so the first draft is useful immediately.
+Guided onboarding can inspect repository signals such as:
 
-The guided flow proposes and reviews:
+- package manifests and lockfiles
+- scripts and Makefiles
+- CI workflows
+- Docker files
+- Python tooling
+- lint and formatting configs
+- local conventions in repository docs
 
-- project name
-- project summary
-- repository components
-- package manager rule
-- runtime rule
-- **suggested validation commands** (detected from package.json scripts, Makefile, CI workflows)
-- **suggested workspace sections** (inferred from TypeScript, linter configs, CONTRIBUTING.md)
-- whether to keep the review checklist
-- **suggested checklist enhancements** (derived from detected validation commands)
+The guided flow reviews:
 
-Every suggestion carries a provenance label (`detected` or `inferred`) so the operator can see where each item came from. In larger repos, repeated suggestions from the same source are grouped so the operator can keep all, review in detail, or skip all without prompt fatigue.
+- project name and summary
+- detected repository components
+- package manager and runtime rules
+- suggested validation commands
+- suggested workspace sections
+- review checklist inclusion and enhancements
+- agent rollout choice
 
-Choice prompts spell out the action next to the shortcut, for example `keep (Y), edit (e), skip (n)` or `keep all (Y), review one by one (r), skip all (n)`. The guided flow also accepts the full words (`keep`, `edit`, `skip`, `review`) in addition to the single-letter shortcuts.
+Every suggestion carries provenance so the operator can see whether it was detected or inferred.
 
-During component review, mixed and monorepo-style repos also surface **primary** and **secondary** slices to make ownership clearer before anything is written into the spec.
+## Selective Agent Support
 
-At the end of onboarding, Agent Jump Start prints a trust summary that tells the operator what they edited, what they skipped, where to verify it in the spec, and the exact next command to run.
+Agent Jump Start can manage all supported agents or a chosen subset.
 
-It works both in a real TTY and with piped stdin, so it can be tested or automated.
+The operator model is simple:
+
+- the canonical spec is the source of truth
+- `sync`, `render`, and `check` read only from the spec
+- `init` can set the initial agent rollout
+- `update-agents` expands or resets support later
+
+### Default behavior
+
+If `agentSupport` is missing from the canonical spec, Agent Jump Start supports all agents.
+
+### Initialize with all, detected, or explicit agents
+
+```bash
+# Support every agent target
+agent-jump-start init --target . --agents all
+
+# In an existing repo, detect current agent usage and start there
+agent-jump-start init --target . --agents detected
+
+# Start with an explicit subset
+agent-jump-start init --target . --agents claude-code,cursor,github-copilot
+```
+
+Guided onboarding offers the same choices interactively.
+
+### Add more agents later
+
+```bash
+# Add one or more missing agents
+agent-jump-start update-agents \
+  --spec docs/agent-jump-start/canonical-spec.yaml \
+  --include github-copilot,aider
+
+# Reset to full coverage
+agent-jump-start update-agents \
+  --spec docs/agent-jump-start/canonical-spec.yaml \
+  --all-missing
+```
+
+### What always stays canonical
+
+These paths are infrastructure and remain managed even when you support only a subset of agents:
+
+- `.agents/AGENTS.md`
+- `.agents/skills/<slug>/`
+- `docs/agent-review-checklist.md`
+- `docs/agent-jump-start/generated-manifest.json`
+
+### How the spec stores the choice
+
+```json
+{
+  "agentSupport": {
+    "mode": "selected",
+    "selected": ["claude-code", "cursor", "github-copilot"]
+  }
+}
+```
+
+If all agents are enabled, `agentSupport` is omitted for a cleaner spec.
+
+## Existing Repository Adoption
+
+Existing repositories are the main real-world case. Agent Jump Start is designed to adopt them safely.
+
+If the repo already contains hand-written files such as `CLAUDE.md`, `AGENTS.md`, `.github/copilot-instructions.md`, Cursor rules, Windsurf rules, Cline rules, Roo rules, Continue rules, Amazon Q rules, Junie files, or `CONVENTIONS.md`, the CLI will not silently overwrite them.
+
+A file is treated as Agent Jump Start-managed only when it carries the provenance marker embedded in generated outputs.
+
+### Conflict handling
+
+When unmanaged pre-existing files are found:
+
+- interactive TTY sessions prompt per conflict group, not per file
+- mirrored skill-package collisions are grouped by skill slug
+- other conflicts are grouped by root such as `.github`, `.claude`, `.agents`, or workspace root
+- non-interactive sessions fail closed unless you choose a policy
+
+Supported policies on `init`, `sync`, and `render`:
+
+| Flag | Effect |
+|---|---|
+| `--force` | overwrite pre-existing operator-authored files |
+| `--backup` | create `<file>.ajs-backup-<timestamp>` before overwrite |
+| `--keep-existing` | preserve existing files, skip the rendered version, and exclude it from the manifest |
+
+### Recommended adoption flow
+
+```bash
+agent-jump-start init --target . --non-interactive --keep-existing
+agent-jump-start absorb --spec docs/agent-jump-start/canonical-spec.yaml --target .
+agent-jump-start sync --spec docs/agent-jump-start/canonical-spec.yaml --target . --force
+```
+
+### Selective adoption in existing repositories
+
+Selective agent support works well with adoption flows:
+
+```bash
+# Start from agents already present in the repository
+agent-jump-start init \
+  --target . \
+  --non-interactive \
+  --agents detected \
+  --keep-existing
+```
+
+If `--keep-existing` would make one of the selected agents non-convergent, Agent Jump Start removes that agent from the managed selection before writing the spec, so the repository still converges on the first `check`.
+
+## Daily Maintenance
+
+`sync` is the main maintenance command.
+
+```bash
+agent-jump-start sync --spec docs/agent-jump-start/canonical-spec.yaml --target .
+```
+
+What it does:
+
+1. validates the canonical spec
+2. renders the current managed output set
+3. removes stale generated files that are no longer owned
+4. writes the current output set with overwrite protection
+5. verifies the final state with the same ground truth that was written
+
+`check` is the read-only CI equivalent:
+
+```bash
+agent-jump-start check --spec docs/agent-jump-start/canonical-spec.yaml --target .
+```
+
+`render` is available when you want direct render semantics without the full `sync` maintenance path:
+
+```bash
+agent-jump-start render --spec docs/agent-jump-start/canonical-spec.yaml --target . --clean
+```
 
 ## Common Commands
 
 | If you want to... | Command |
 |---|---|
-| Initialize a repo and draft the canonical spec | `agent-jump-start init --target .` |
-| Use the non-interactive bootstrap for automation | `agent-jump-start init --non-interactive --target .` |
-| Re-render and clean every managed output | `agent-jump-start sync --spec docs/agent-jump-start/canonical-spec.yaml` |
-| Fail CI when generated files drifted | `agent-jump-start check --spec docs/agent-jump-start/canonical-spec.yaml --target .` |
-| Diagnose generic or incomplete spec content | `agent-jump-start doctor --spec docs/agent-jump-start/canonical-spec.yaml` |
-| Inspect repo evidence before editing the spec manually | `agent-jump-start infer --target .` |
-| Generate a schema-shaped overlay from repo evidence | `agent-jump-start infer-overlay --target . --base canonical-spec.yaml --output overlay.yaml` |
-| Absorb pre-existing agent instruction files into canonical spec | `agent-jump-start absorb --spec docs/agent-jump-start/canonical-spec.yaml --target .` |
-| Adopt skills already present in local agent folders | `agent-jump-start intake --spec docs/agent-jump-start/canonical-spec.yaml` |
+| Initialize a repo with guided onboarding | `agent-jump-start init --target .` |
+| Initialize non-interactively | `agent-jump-start init --non-interactive --target .` |
+| Start from detected agents in an existing repo | `agent-jump-start init --target . --agents detected` |
+| Re-render and converge managed outputs | `agent-jump-start sync --spec docs/agent-jump-start/canonical-spec.yaml --target .` |
+| Fail CI on drift | `agent-jump-start check --spec docs/agent-jump-start/canonical-spec.yaml --target .` |
+| Diagnose a weak or generic spec | `agent-jump-start doctor --spec docs/agent-jump-start/canonical-spec.yaml` |
+| Review repository evidence | `agent-jump-start infer --target .` |
+| Generate a schema-shaped overlay | `agent-jump-start infer-overlay --target . --base canonical-spec.yaml --output overlay.yaml` |
+| Absorb existing agent files into canonical memory | `agent-jump-start absorb --spec docs/agent-jump-start/canonical-spec.yaml --target .` |
+| Review or import local skill packages | `agent-jump-start intake --spec docs/agent-jump-start/canonical-spec.yaml` |
 | Import one explicit skill package | `agent-jump-start import-skill --spec docs/agent-jump-start/canonical-spec.yaml --skill path/to/skill-directory` |
-
-`sync` is the normal maintenance command. It renders outputs, removes stale files, and verifies consistency in one step. If it finds local skills under `.agents/skills/`, `.claude/skills/`, or `.github/skills/` that are outside canonical management, it points you to `intake`.
-
-The canonical spec uses a strict YAML subset that is also valid JSON, so it stays easy to read and can be parsed without extra runtime dependencies.
+| Add more managed agents later | `agent-jump-start update-agents --spec docs/agent-jump-start/canonical-spec.yaml --include github-copilot,aider` |
 
 ## Supported Agents
 
 | Agent | Generated output |
 |---|---|
 | Claude Code | `CLAUDE.md`, `.claude/skills/*/SKILL.md` |
-| GitHub Copilot | `.github/copilot-instructions.md`, `.github/skills/*/SKILL.md` |
+| GitHub Copilot | `.github/copilot-instructions.md`, `.github/instructions/general.instructions.md`, `.github/skills/*/SKILL.md` |
 | Gemini CLI | `GEMINI.md` |
 | Amazon Q Developer | `.amazonq/rules/general.md` |
 | JetBrains Junie | `.junie/AGENTS.md`, `.junie/guidelines.md` |
-| GitHub Agents | `AGENTS.md`, `.agents/skills/*/SKILL.md` |
-| AGENTS.md fallback compatibility | `AGENT.md` |
+| GitHub Agents | `AGENTS.md`, `AGENT.md`, canonical `.agents/skills/*/` |
 | Cursor | `.cursor/rules/agent-instructions.mdc`, `.cursor/rules/*.mdc` |
 | Windsurf | `.windsurf/rules/general.md`, `.windsurfrules` |
-| Cline | `.clinerules/general.md`, `.clinerules` (legacy fallback) |
+| Cline | `.clinerules/general.md`, `.clinerules` when legacy fallback is required |
 | Roo Code | `.roo/rules/agent-instructions.md`, `.roorules` |
 | Continue.dev | `.continue/rules/agent-instructions.md` |
 | Aider | `CONVENTIONS.md` |
 
-- `.agents/AGENTS.md` is the canonical workspace instruction file.
-- `.agents/skills/` is the canonical skill package tree.
-- `.claude/skills/` and `.github/skills/` are byte-identical mirrors of the canonical packages.
-- Agents without native skill-package support receive mirrored workspace instructions plus inline skill summaries.
+Notes:
 
-## Agent File Coverage
-
-### Propagation Coverage (sync/render managed outputs)
-
-```text
-.agents/AGENTS.md
-AGENTS.md
-AGENT.md
-CLAUDE.md
-GEMINI.md
-.github/copilot-instructions.md
-.github/instructions/general.instructions.md
-.cursor/rules/agent-instructions.mdc
-.windsurf/rules/general.md
-.windsurfrules
-.clinerules/general.md
-.clinerules (legacy fallback when a root .clinerules file already exists)
-.roo/rules/agent-instructions.md
-.roorules
-.continue/rules/agent-instructions.md
-.amazonq/rules/general.md
-.junie/AGENTS.md
-.junie/guidelines.md
-CONVENTIONS.md
-```
-
-### Discovery Coverage (pre-existing files recognized)
-
-```text
-AGENTS.md, AGENT.md, CLAUDE.md, GEMINI.md
-.github/copilot-instructions.md
-.github/instructions/**/*.instructions.md
-.cursor/rules/**/*.mdc
-.continue/rules/**/*.{md,txt}
-.windsurf/rules/**/*.{md,txt}
-.windsurfrules
-.clinerules/**/*.{md,txt}
-.clinerules
-.roo/rules/**/*.{md,txt}
-.roorules
-.amazonq/rules/**/*.md
-.junie/AGENTS.md
-.junie/guidelines.md
-.junie/guidelines/**/*.md
-CONVENTIONS.md
-```
-
-## Requirements
-
-- Node.js >= 18
-- No npm dependencies required
-
-## Installation Options
-
-| Install path | Best for | Command |
-|---|---|---|
-| Global install | Daily use on your machine | `npm install -g @marcogoldin/agent-jump-start` |
-| `npx` | One-off execution without install | `npx @marcogoldin/agent-jump-start@latest <command>` |
-| Vendored in-repo copy | Teams that want the toolkit committed inside the repo | `git clone https://github.com/marcogoldin/agent-jump-start.git docs/agent-jump-start` |
-
-The most reliable execution paths are the global `agent-jump-start` binary and vendored usage via `node docs/agent-jump-start/scripts/agent-jump-start.mjs`.
+- `.agents/AGENTS.md` is the canonical workspace instruction file
+- `.agents/skills/` is the canonical skill package tree
+- `.claude/skills/` and `.github/skills/` are mirrors of the canonical packages
+- agents without native skill-package support receive workspace guidance plus inline skill summaries
 
 ## Skill Packages
 
-Agent Jump Start supports portable skill packages that define reusable instruction sets. Skills are imported into the canonical spec, then synchronized across all agent outputs.
+Agent Jump Start supports portable skill packages with a `SKILL.md` entrypoint and optional `references/`, `scripts/`, and `assets/` folders.
 
-### Skill structure
-
-Each skill is a directory containing a `SKILL.md` with YAML frontmatter, plus optional `references/`, `scripts/`, and `assets/` subdirectories.
-
-### Import a skill
+### Import one skill
 
 ```bash
 agent-jump-start import-skill \
   --spec docs/agent-jump-start/canonical-spec.yaml \
   --skill path/to/skill-directory
 
-# Overwrite an existing skill with the same slug
 agent-jump-start import-skill \
   --spec docs/agent-jump-start/canonical-spec.yaml \
   --skill path/to/skill-directory \
@@ -219,49 +294,43 @@ agent-jump-start import-skill \
 
 Supported import sources:
 
-- A skill directory (e.g. `path/to/python-pro/`)
-- An installed skill package (e.g. `.agents/skills/python-pro/`)
-- A standalone `SKILL.md` file
-- A legacy JSON skill file
+- a skill directory
+- a standalone `SKILL.md` file
+- an installed local skill package
+- a legacy JSON skill file
 
-Each successful `import-skill` run also updates `agent-jump-start.lock.json` next to the spec. The lockfile records the imported skill slug, version, checksum, source, and resolved path so refresh workflows can be audited and reproduced safely.
+Each successful import updates `agent-jump-start.lock.json` next to the spec. The lockfile records slug, version, checksum, source, and resolved path.
 
-### Intake locally installed skills
+### Adopt locally installed skills
 
-Use `intake` when a third-party tool has already written skills into local agent folders and you want Agent Jump Start to adopt them into canonical project memory.
+Use `intake` when another tool already wrote skills into local agent folders and you want Agent Jump Start to make them canonical.
 
 ```bash
-# Review local skill packages and see which ones are unmanaged
+# Review local skill packages
 agent-jump-start intake \
   --spec docs/agent-jump-start/canonical-spec.yaml
 
-# Import all valid unmanaged skills into the canonical spec
+# Import all valid unmanaged skills
 agent-jump-start intake \
   --spec docs/agent-jump-start/canonical-spec.yaml \
   --import
 
-# Replace canonically managed skills from local disk when needed
-# (only locally-tracked skills are eligible; upstream-tracked skills
-# from github/skills/skillfish are protected from provenance downgrade)
+# Replace canonically managed local skills when appropriate
 agent-jump-start intake \
   --spec docs/agent-jump-start/canonical-spec.yaml \
   --import --replace
-
-# After intake, propagate the canonically managed set across all targets
-agent-jump-start sync \
-  --spec docs/agent-jump-start/canonical-spec.yaml
 ```
 
 Important distinction:
 
-- "installed locally" means a skill package exists on disk under `.agents/skills/`, `.claude/skills/`, or `.github/skills/`
-- "managed canonically" means the skill is present in `canonical-spec.yaml` and tracked in `agent-jump-start.lock.json`
+- installed locally means a skill exists on disk under `.agents/skills/`, `.claude/skills/`, or `.github/skills/`
+- managed canonically means the skill is present in the canonical spec and tracked in the lockfile
 - `sync` propagates only canonically managed skills
-- `intake` reports invalid local skills with per-skill reasons instead of importing them blindly
+- `intake` reports invalid local skills with explicit reasons instead of importing them blindly
 
 ### Add a skill from a higher-level source
 
-`add-skill` resolves a source into a local SKILL.md package, then imports it into the canonical spec.
+`add-skill` resolves a higher-level source into a local package, then imports it into the canonical spec.
 
 ```bash
 # Local path
@@ -274,19 +343,19 @@ agent-jump-start add-skill \
   https://github.com/Jeffallan/claude-skills/tree/main/skills/python-pro \
   --spec docs/agent-jump-start/canonical-spec.yaml
 
-# GitHub repository shorthand plus explicit skill name
+# Repository shorthand plus explicit skill name
 agent-jump-start add-skill \
   github:vercel-labs/agent-skills \
   --skill web-design-guidelines \
   --spec docs/agent-jump-start/canonical-spec.yaml
 
-# Resolve through the open `skills` CLI
+# Through the open skills CLI
 agent-jump-start add-skill \
   skills:vercel-labs/agent-skills \
   --skill web-design-guidelines \
   --spec docs/agent-jump-start/canonical-spec.yaml
 
-# Resolve through Skillfish
+# Through Skillfish
 agent-jump-start add-skill \
   skillfish:nguyenthienthanh/aura-frog \
   --skill nodejs-expert \
@@ -302,17 +371,14 @@ Supported `add-skill` sources:
 
 Notes:
 
-- `skills:` and `skillfish:` adapters require `npx` on `PATH`.
-- GitHub sources require `git` on `PATH`.
-- If a third-party tool already wrote skills into `./.agents/skills/`, `./.claude/skills/`, or `./.github/skills/`, use `intake` to review and import them into the spec.
-- Successful `add-skill` imports also update `agent-jump-start.lock.json` next to the spec with provenance metadata for each imported skill.
+- `skills:` and `skillfish:` adapters require `npx` on `PATH`
+- GitHub sources require `git` on `PATH`
+- successful `add-skill` imports also update the lockfile with provenance metadata
 
 ### Refresh imported skills
 
-Use `update-skills` to re-resolve imported skills from the provenance lockfile, compare upstream checksums, and refresh the canonical spec only when the source changed.
-
 ```bash
-# Preview what would change
+# Preview
 agent-jump-start update-skills \
   --spec docs/agent-jump-start/canonical-spec.yaml \
   --dry-run
@@ -321,19 +387,13 @@ agent-jump-start update-skills \
 agent-jump-start update-skills \
   --spec docs/agent-jump-start/canonical-spec.yaml
 
-# Refresh only one tracked skill
+# Refresh one tracked skill
 agent-jump-start update-skills \
   --spec docs/agent-jump-start/canonical-spec.yaml \
   --skill python-pro
 ```
 
-`update-skills` uses `agent-jump-start.lock.json` as the provenance source of truth. It exits non-zero when a tracked skill cannot be re-resolved cleanly, warns and skips unreachable sources, and updates the spec plus lockfile only when a refresh actually succeeds.
-
-### Validate a skill before import
-
-```bash
-agent-jump-start validate-skill path/to/skill-directory
-```
+`update-skills` uses the lockfile as the provenance source of truth and updates the spec only when the source actually changed.
 
 ### Export a skill
 
@@ -344,138 +404,38 @@ agent-jump-start export-skill \
   --output ./exported-skills/python-pro
 ```
 
-### External skill fidelity
+## Layered Specs
 
-Imported skills preserve their original structure and semantic intent:
+Layered specs are useful for monorepos or shared-base setups.
 
-- Each H2 section becomes its own category (not flattened)
-- Section ordering is maintained via priority numbers
-- Prose sections are preserved as rule guidance
-- Round-trip stability: import, export, re-import produces identical output
+The model is simple:
 
-### Semantic rule classification
+- the base owns shared rules
+- each leaf owns what is specific to that package or app
+- mutating commands write back only to the leaf
+- validation errors identify the layer that owns the failing field
 
-Rules support automatic semantic classification during import:
+This now also applies to agent selection state. A leaf can narrow, expand, or reset inherited `agentSupport` safely.
 
-- **Prohibition detection** — language like `must not`, `never`, `avoid`, `do not` is auto-detected and tagged on individual rules, while positive directives in the same section are correctly classified as directives
-- **Semantic tags** — rules carry an optional `semantic` field (`directive`, `prohibition`, `workflow`, `example`, `reference`) preserved through rendering and export
-- **Rendered output** — semantic tags appear as `[PROHIBITION]`, `[WORKFLOW]`, `[EXAMPLE]` markers in detailed guidance
+References:
 
-## How Synchronization Works
+- operator guide: [docs/layered-specs.md](docs/layered-specs.md)
+- copyable example: [specs/examples/monorepo/](specs/examples/monorepo/)
 
-```text
-canonical-spec.yaml
-  -> .agents/AGENTS.md           (canonical workspace governance)
-  -> .agents/skills/<slug>/      (canonical skill packages)
-  -> agent-specific mirrors and projections
-```
-
-1. The spec is validated.
-2. `.agents/AGENTS.md` is rendered as the canonical workspace instruction file.
-3. Skills are rendered into canonical `.agents/skills/<slug>/` packages.
-4. `.claude/skills/` and `.github/skills/` are generated as byte-identical mirrors.
-5. Cursor gets MDC projections.
-6. Agents without native skill folders receive mirrored workspace guidance plus inline skill summaries.
-7. `generated-manifest.json` records managed files so `check` and `--clean` can detect drift and stale outputs.
-
-## Generated Output
-
-Typical render output:
-
-```text
-.agents/AGENTS.md
-.agents/skills/<slug>/SKILL.md
-.agents/skills/<slug>/AGENTS.md
-.agents/skills/<slug>/references/*
-.agents/skills/<slug>/scripts/*
-.agents/skills/<slug>/assets/*
-AGENTS.md
-AGENT.md
-CLAUDE.md
-GEMINI.md
-.claude/skills/<slug>/SKILL.md
-.github/copilot-instructions.md
-.github/instructions/general.instructions.md
-.github/skills/<slug>/SKILL.md
-.cursor/rules/agent-instructions.mdc
-.cursor/rules/<slug>.mdc
-.windsurf/rules/general.md
-.windsurfrules
-.clinerules/general.md
-.clinerules
-.roo/rules/agent-instructions.md
-.roorules
-.continue/rules/agent-instructions.md
-.amazonq/rules/general.md
-.junie/AGENTS.md
-.junie/guidelines.md
-CONVENTIONS.md
-docs/agent-review-checklist.md
-docs/agent-jump-start/generated-manifest.json
-docs/agent-jump-start/agent-jump-start.lock.json
-```
-
-## Installing Into A Repo That Already Has Agent Files
-
-If your repo already contains hand-written `CLAUDE.md`, `AGENTS.md`, `AGENT.md`, `GEMINI.md`, `.github/copilot-instructions.md`, `.github/instructions/*.instructions.md`, Cursor/Windsurf/Cline/Roo/Continue/Amazon Q/Junie rules, or `CONVENTIONS.md`, Agent Jump Start will **never** silently overwrite them. A file is only treated as tool-managed if it carries the `Agent Jump Start` provenance marker embedded in every rendered artifact.
-
-On first run, `init`, `sync`, and `render` detect unmanaged pre-existing files and behave as follows:
-
-- **Interactive TTY** — the CLI prompts per conflict group, not per file. Mirrored skill-package collisions are grouped by skill slug; other collisions are grouped by root (`.github`, `.claude`, `.agents`, workspace root, and so on). Each group offers the same three choices: keep, overwrite, or backup-then-overwrite.
-- **Non-interactive (CI, piped input, scripts)** — the CLI refuses the run and exits non-zero with a grouped summary of the conflicts. Choose one of the flags below and re-run.
-
-Flags accepted by `init`, `sync`, and `render`:
-
-| Flag | Effect |
-|---|---|
-| `--force` | Overwrite pre-existing operator-authored files with the rendered versions |
-| `--backup` | Copy each pre-existing file to `<file>.ajs-backup-<timestamp>` before overwriting |
-| `--keep-existing` | Leave pre-existing files untouched; skip the rendered version and exclude it from the manifest |
-
-Recommended convergence flow for hybrid repositories:
-
-```bash
-agent-jump-start init --target . --non-interactive --keep-existing
-agent-jump-start absorb --spec docs/agent-jump-start/canonical-spec.yaml --target .
-agent-jump-start sync --spec docs/agent-jump-start/canonical-spec.yaml --target . --force
-```
-
-`absorb` updates only the canonical spec (or layered leaf) using reviewed extraction output from unmanaged pre-existing agent files. It never overwrites instruction targets directly; `sync` remains the explicit propagation step.
-
-If the canonical spec does not exist yet, start with:
-
-```bash
-agent-jump-start init --target . --non-interactive --keep-existing
-```
-
-Then continue with `absorb` and `sync --force` as shown above.
-
-`absorb` execution modes:
-
-| Mode | Usage | Behavior |
-|---|---|---|
-| Interactive TTY | `agent-jump-start absorb --spec <path> --target <path>` | Guided per-source review, preview, confirm write |
-| CI preview | `agent-jump-start absorb --spec <path> --target <path> --dry-run --output absorb-proposal.yaml` | Writes deterministic proposal artifact, no spec write |
-| CI apply | `agent-jump-start absorb --spec <path> --target <path> --apply --selection absorb-selection.yaml` | Applies explicit reviewed decisions only |
-
-### Removing Only Tool-Managed Outputs
-
-Every path listed in `docs/agent-jump-start/generated-manifest.json` was authored by Agent Jump Start. To reset the tool without touching operator-authored files, delete exactly those paths — anything not in the manifest (including anything you preserved with `--keep-existing`) will stay untouched.
-
-## Architecture In One Glance
+## Architecture At A Glance
 
 | Source of truth | Purpose |
 |---|---|
-| `docs/agent-jump-start/canonical-spec.yaml` | Canonical project memory: rules, validation, review checklist, skills |
-| `.agents/AGENTS.md` | Canonical workspace instruction file |
-| `.agents/skills/<slug>/` | Canonical skill packages |
-| Agent-specific mirrors | Projections for Claude, Copilot, Gemini, Amazon Q, Junie, Cursor, Windsurf, Cline, Roo, Continue, and Aider |
-| `docs/agent-jump-start/generated-manifest.json` | Tracks managed outputs for cleanup and drift detection |
-| `docs/agent-jump-start/agent-jump-start.lock.json` | Tracks imported skill provenance and refreshable sources |
+| `docs/agent-jump-start/canonical-spec.yaml` | canonical project memory |
+| `.agents/AGENTS.md` | canonical workspace instruction file |
+| `.agents/skills/<slug>/` | canonical skill packages |
+| agent-specific mirrors | projections for each supported ecosystem |
+| `docs/agent-jump-start/generated-manifest.json` | current managed file set for cleanup and drift detection |
+| `docs/agent-jump-start/agent-jump-start.lock.json` | imported skill provenance and refreshable sources |
 
 ## Minimal Spec Example
 
-```yaml
+```json
 {
   "schemaVersion": 1,
   "project": {
@@ -503,16 +463,22 @@ Every path listed in `docs/agent-jump-start/generated-manifest.json` was authore
     ]
   },
   "reviewChecklist": {
-    "intro": "Review AI-generated changes against repository-specific constraints.",
+    "intro": "Review generated changes against repository-specific constraints.",
     "failureThreshold": 2,
     "items": [
       {
         "title": "Uses repository constraints",
-        "details": ["The change should follow the real stack and validation commands."]
+        "details": [
+          "The change should follow the real stack and validation commands."
+        ]
       }
     ],
-    "quickSignals": ["Generated files remain in sync."],
-    "redFlags": ["Hand-edited generated instruction files."]
+    "quickSignals": [
+      "Generated files remain in sync."
+    ],
+    "redFlags": [
+      "Hand-edited generated instruction files."
+    ]
   },
   "skills": []
 }
@@ -526,14 +492,14 @@ agent-jump-start --version
 agent-jump-start list-agents
 agent-jump-start list-profiles
 
-agent-jump-start init [--profile <path>] [--target <path>] [--non-interactive]
+agent-jump-start init [--profile <path>] [--target <path>] [--non-interactive] [--agents all|detected|<id,...>]
 agent-jump-start bootstrap --base <path> [--profile <path>] [--output <path>]
-agent-jump-start sync --spec <path> [--target <path>]
+agent-jump-start sync --spec <path> [--target <path>] [--force | --backup | --keep-existing]
 agent-jump-start infer --target <path> [--output <path>] [--section <name>] [--format json|text]
 agent-jump-start infer-overlay --target <path> [--output <path>] [--base <path>] [--section <name>]
 agent-jump-start absorb --spec <path> [--target <path>] [--dry-run] [--output <path>] [--apply --selection <path>]
 agent-jump-start doctor --spec <path> [--suggest --target <path>]
-agent-jump-start render --spec <path> [--target <path>] [--clean]
+agent-jump-start render --spec <path> [--target <path>] [--clean] [--force | --backup | --keep-existing]
 agent-jump-start check --spec <path> [--target <path>]
 agent-jump-start validate --spec <path>
 
@@ -543,55 +509,45 @@ agent-jump-start import-skill --spec <path> --skill <path> [--replace]
 agent-jump-start add-skill <source> --spec <path> [--skill <name>] [--replace] [--provider <name>]
 agent-jump-start export-skill --spec <path> --slug <name> --output <path>
 agent-jump-start update-skills --spec <path> [--skill <slug>] [--dry-run]
+agent-jump-start update-agents --spec <path> [--include <id,...>] [--all-missing] [--mode all]
 agent-jump-start export-schema [--output <path>]
 agent-jump-start demo-clean --target <path>
 agent-jump-start demo-tree --target <path>
 ```
 
-The most reliable execution paths are `agent-jump-start` after a global install and the vendored `node docs/agent-jump-start/scripts/agent-jump-start.mjs`. `npx @marcogoldin/agent-jump-start@latest ...` may also work, but some npm environments do not resolve the published bin consistently.
+## Requirements
 
-## Export Schema
+- Node.js >= 18
+- npm for installation and distribution
+- no runtime dependencies required
 
-Export the canonical spec JSON Schema for IDE autocompletion and validation:
+## Installation Options
 
-```bash
-agent-jump-start export-schema --output canonical-spec.schema.json
-```
+| Install path | Best for | Command |
+|---|---|---|
+| Global install | daily use on one machine | `npm install -g @marcogoldin/agent-jump-start` |
+| `npx` | one-off execution | `npx @marcogoldin/agent-jump-start@latest <command>` |
+| Vendored in-repo copy | teams that want the toolkit committed inside the repo | `git clone https://github.com/marcogoldin/agent-jump-start.git docs/agent-jump-start` |
 
-## Layered Specs (Monorepos)
-
-One base, many leaves. Each leaf uses `extends` to inherit shared rules and
-overrides only what differs. The **base owns what is shared, each leaf owns
-what makes its package different**, and every mutating command (`import-skill`,
-`update-skills`, `intake`, `add-skill`) writes back **only to the leaf**.
-Validation errors name the layer that owns the offending field, so you always
-know which file to open.
-
-- Operator guide: [docs/layered-specs.md](docs/layered-specs.md)
-- Copyable two-package example: [specs/examples/monorepo/](specs/examples/monorepo/)
+The most reliable execution paths are the global `agent-jump-start` binary and vendored usage via `node docs/agent-jump-start/scripts/agent-jump-start.mjs`.
 
 ## Current Limitations
 
-- `infer-overlay --base <spec>` produces a layered overlay that can be validated directly. Without `--base`, the command emits a partial overlay fragment intended for manual merge or further editing.
-- `intake --import --replace` is provenance-safe: skills tracked with upstream provenance (`github`, `skills`, `skillfish`) are never downgraded to `local-directory`. Only locally tracked managed skills can be replaced via intake.
-- Broken symlinks in local skill directories are silently skipped during discovery and do not crash sync.
-- Gemini, Amazon Q, Junie, Continue, Aider, Windsurf, Cline, and Roo Code do not receive native skill packages; they receive mirrored workspace guidance plus inline skill summaries.
-- `absorb` v1 intentionally targets only `workspaceInstructions.sections` and `workspaceInstructions.validation`; checklist/summary absorption is deferred.
-- Remote skill import supports GitHub sources plus `skills` and `skillfish` adapters.
-- Skills installed directly by third-party CLIs into `./.agents/skills/` remain unmanaged until they are imported into the canonical spec.
-- Direct `npx @marcogoldin/agent-jump-start@latest ...` execution may not resolve the published bin consistently across npm environments; global install and vendored usage are the most reliable paths.
+- `sync`, `render`, and `check` do not accept transient `--agents` overrides. Agent selection belongs to canonical spec state.
+- `intake --import --replace` is provenance-safe. Upstream-tracked skills are not downgraded to local-only provenance.
+- Gemini, Amazon Q, Junie, Continue, Aider, Windsurf, Cline, and Roo Code do not receive native skill packages; they receive workspace guidance plus inline skill summaries.
+- `absorb` v1 intentionally targets `workspaceInstructions.sections` and `workspaceInstructions.validation` only.
+- direct `npx @marcogoldin/agent-jump-start@latest ...` execution may vary across npm environments; global install and vendored usage are the most reliable paths.
 
 ## Portability
 
 The content model is stack-agnostic. Node.js is only the generator runtime.
 
-If your team wants a different implementation language, you can preserve:
+If a team wants a different implementation language, it can preserve:
 
 - the canonical spec format
 - the generated file layout
 - the synchronization model
-
-and reimplement the renderer elsewhere.
 
 ## Testing
 
@@ -599,14 +555,14 @@ and reimplement the renderer elsewhere.
 npm test
 ```
 
-236 tests covering core workflows, sync command, doctor diagnostics, layered specs, layer-aware validation diagnostics, leaf-only writeback semantics, deep introspection, spec inference, overlay generation, assisted bootstrap, guided onboarding, project introspection, skill import/export, provenance lockfiles, `update-skills` refresh flows, progressive disclosure, high-level source adapters, semantic classification, mirror sync integrity, round-trip stability, provenance-safe intake replace, symlink resilience, absorb-driven hybrid-repo convergence, expanded agent-file coverage, and single-command trust regressions.
+245 tests cover core workflows, sync convergence, overwrite protection, guided onboarding, inference, layered specs, leaf-only writeback, skill import and export, provenance lockfiles, absorb flows, grouped conflict prompts, selective agent support, and regression cases from real existing-repository adoption.
 
 ## Contributing
 
 1. Create a branch.
 2. Make the smallest coherent change that solves one problem.
 3. Run `npm test`.
-4. Update the README when user-visible behavior changes.
+4. Update `README.md` when user-visible behavior changes.
 5. Open a pull request.
 
 ## License

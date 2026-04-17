@@ -28,6 +28,7 @@ import { handleInfer, handleInferOverlay, handleDoctor } from "../lib/commands/i
 import { handleAbsorb } from "../lib/commands/absorb.mjs";
 import { handleValidateSkill, handleIntake, handleImportSkill, handleAddSkill, handleExportSkill, handleUpdateSkills } from "../lib/commands/skills.mjs";
 import { handleValidate, handleExportSchema, handleListAgents, handleListProfiles, handleDemoClean, handleDemoTree } from "../lib/commands/info.mjs";
+import { handleUpdateAgents } from "../lib/commands/update-agents.mjs";
 
 // ---------------------------------------------------------------------------
 // Usage
@@ -38,6 +39,7 @@ function usage() {
 
 Commands:
   init           [--profile <path>] [--target <path>] [--non-interactive] [--overwrite]
+                 [--agents all|detected|<id,...>]
                  [--force | --backup | --keep-existing]
   bootstrap      --base <path> [--profile <path>] [--output <path>]
   sync           --spec <path> [--target <path>] [--force | --backup | --keep-existing]
@@ -57,6 +59,7 @@ Commands:
   export-skill   --spec <path> --slug <slug> --output <path>
   export-schema  [--output <path>]
   update-skills  --spec <path> [--skill <slug>] [--dry-run]
+  update-agents  --spec <path> [--include <id,...>] [--all-missing] [--mode all]
   list-agents
   list-profiles
 
@@ -75,7 +78,7 @@ Overwrite protection (init, sync, render):
   --force            Overwrite pre-existing operator-authored files
   --backup           Save a timestamped .ajs-backup-* copy, then overwrite
   --keep-existing    Leave pre-existing files untouched and skip those targets
-  (Interactive TTY sessions will prompt per file when none of the flags are set.)
+  (Interactive TTY sessions will prompt per conflict group when none of the flags are set.)
 
 Examples:
   npx @marcogoldin/agent-jump-start@latest init \\
@@ -206,6 +209,7 @@ const COMMAND_MAP = {
   "add-skill":      (opts, args)  => handleAddSkill(opts, args),
   "export-skill":   (opts)        => handleExportSkill(opts),
   "update-skills":  (opts)        => handleUpdateSkills(opts),
+  "update-agents":  (opts)        => handleUpdateAgents(opts),
   "export-schema":  (opts)        => handleExportSchema(opts),
   "list-agents":    ()            => handleListAgents(),
   "list-profiles":  ()            => handleListProfiles(),
