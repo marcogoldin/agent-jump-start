@@ -182,13 +182,14 @@ scenario("sync-keep-existing-leaves-files-untouched", (dir) => {
   seed(dir);
   const specPath = writeMinimalSpec(dir);
   const result = run(["sync", "--spec", specPath, "--target", dir, "--keep-existing"]);
-  assert.equal(result.status, 0);
+  assert.equal(result.status, 2, "sync --keep-existing must report safe but non-converged state");
   expectAllSentinelsPresent(dir);
   assert.ok(existsSync(join(dir, "docs/agent-jump-start/generated-manifest.json")));
   const manifest = JSON.parse(readFileSync(join(dir, "docs/agent-jump-start/generated-manifest.json"), "utf8"));
   for (const [relPath] of SENTINELS) {
     assert.ok(!manifest.files.includes(relPath), `${relPath} must not appear in the manifest files list when kept`);
   }
+  assert.match(result.stdout, /NOT fully converged/);
 });
 
 scenario("managed-files-still-re-sync-smoothly", (dir) => {

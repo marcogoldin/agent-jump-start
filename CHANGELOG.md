@@ -11,6 +11,28 @@ so versions are documented only where the history provides clear evidence.
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-04-18
+
+### Added
+
+- Added first-class agent lifecycle management after initialization: `update-agents` now supports interactive management, explicit `--remove <id,...>`, and clearer enabled versus not-enabled state reporting.
+- Added `list-agents --spec <path>` so operators can see canonical agent IDs, main outputs, and enabled or disabled project state from the CLI.
+- Added disabled-agent cleanup and residue reporting for narrowed projects, including empty directory cleanup and reporting for unmanaged residual roots left in place.
+- Added regression coverage for the full selective-agent lifecycle, including removal flows, disabled-root cleanup, layered writeback, and the real existing-repository narrowing scenario validated against `chatopac-runtime`.
+
+### Changed
+
+- Changed `sync --keep-existing` to exit with code `2` when preserved operator-authored files prevent full convergence. This is the SemVer-major contract change in `2.0.0`: the command now reports a safe but non-converged state instead of exiting `0`.
+- Changed `sync` messaging so preserved-file runs are reported as partial completion with exact next-step commands (`absorb`, `sync --force`, `sync --backup`) instead of looking like a fully converged success.
+- Changed `check` to emit a narrower preserved-file hint only when failing paths still look operator-authored and unmanaged.
+- Changed `list-agents` default output to always show canonical agent IDs, making manual spec editing and scripted CLI usage discoverable without reading implementation files.
+- Changed CLI help and command examples to document the new `update-agents --remove`, `list-agents --spec`, and `sync` exit code contract.
+
+### Fixed
+
+- Fixed narrowing flows on already-initialized repositories so disabled-agent cleanup now handles both directory roots and legacy file roots such as `.windsurfrules`, `.roorules`, `.clinerules`, `GEMINI.md`, and `CONVENTIONS.md`.
+- Fixed the selective-agent lifecycle gap where `sync --keep-existing` could appear successful while a later standalone `check` still failed on the same preserved state without a coherent explanation.
+
 ## [1.18.0] - 2026-04-17
 
 ### Added

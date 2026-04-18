@@ -59,8 +59,9 @@ Commands:
   export-skill   --spec <path> --slug <slug> --output <path>
   export-schema  [--output <path>]
   update-skills  --spec <path> [--skill <slug>] [--dry-run]
-  update-agents  --spec <path> [--include <id,...>] [--all-missing] [--mode all]
-  list-agents
+  update-agents  --spec <path> [--include <id,...>] [--remove <id,...>]
+                 [--all-missing] [--mode all]
+  list-agents    [--spec <path>]
   list-profiles
 
 Options:
@@ -79,6 +80,12 @@ Overwrite protection (init, sync, render):
   --backup           Save a timestamped .ajs-backup-* copy, then overwrite
   --keep-existing    Leave pre-existing files untouched and skip those targets
   (Interactive TTY sessions will prompt per conflict group when none of the flags are set.)
+
+Exit codes (sync):
+  0  Fully converged — all files match the spec
+  1  Failure — write errors, blocked files, or genuine drift
+  2  Safe but non-converged — preserved files prevent full convergence
+     (standalone 'check' will report drift; use absorb/force/backup to converge)
 
 Examples:
   npx @marcogoldin/agent-jump-start@latest init \\
@@ -165,7 +172,11 @@ Examples:
   node scripts/agent-jump-start.mjs update-skills \\
     --spec canonical-spec.yaml --skill python-pro
 
+  node scripts/agent-jump-start.mjs update-agents \\
+    --spec canonical-spec.yaml --remove windsurf,aider
+
   node scripts/agent-jump-start.mjs list-agents
+  node scripts/agent-jump-start.mjs list-agents --spec canonical-spec.yaml
   node scripts/agent-jump-start.mjs list-profiles
 
 Supported Agents:
@@ -211,7 +222,7 @@ const COMMAND_MAP = {
   "update-skills":  (opts)        => handleUpdateSkills(opts),
   "update-agents":  (opts)        => handleUpdateAgents(opts),
   "export-schema":  (opts)        => handleExportSchema(opts),
-  "list-agents":    ()            => handleListAgents(),
+  "list-agents":    (opts)        => handleListAgents(opts),
   "list-profiles":  ()            => handleListProfiles(),
   "demo-clean":     (opts)        => handleDemoClean(opts),
   "demo-tree":      (opts)        => handleDemoTree(opts),

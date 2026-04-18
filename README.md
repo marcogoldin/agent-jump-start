@@ -101,7 +101,7 @@ The operator model is simple:
 - the canonical spec is the source of truth
 - `sync`, `render`, and `check` read only from the spec
 - `init` can set the initial agent rollout
-- `update-agents` expands or resets support later
+- `update-agents` can add, remove, inspect, or reset support later
 
 ### Default behavior
 
@@ -129,6 +129,11 @@ Guided onboarding offers the same choices interactively.
 agent-jump-start update-agents \
   --spec docs/agent-jump-start/canonical-spec.yaml \
   --include github-copilot,aider
+
+# Remove one or more enabled agents
+agent-jump-start update-agents \
+  --spec docs/agent-jump-start/canonical-spec.yaml \
+  --remove windsurf,aider
 
 # Reset to full coverage
 agent-jump-start update-agents \
@@ -183,6 +188,12 @@ Supported policies on `init`, `sync`, and `render`:
 | `--backup` | create `<file>.ajs-backup-<timestamp>` before overwrite |
 | `--keep-existing` | preserve existing files, skip the rendered version, and exclude it from the manifest |
 
+`sync --keep-existing` has a distinct exit contract in `2.0.0`:
+
+- exit `0`: fully converged
+- exit `1`: failure or blocked write
+- exit `2`: safe but non-converged because preserved files still need absorb or overwrite
+
 ### Recommended adoption flow
 
 ```bash
@@ -222,6 +233,8 @@ What it does:
 4. writes the current output set with overwrite protection
 5. verifies the final state with the same ground truth that was written
 
+If preserved operator-authored files remain after `--keep-existing`, `sync` now exits `2` and prints the exact next-step commands needed to converge.
+
 `check` is the read-only CI equivalent:
 
 ```bash
@@ -250,6 +263,9 @@ agent-jump-start render --spec docs/agent-jump-start/canonical-spec.yaml --targe
 | Review or import local skill packages | `agent-jump-start intake --spec docs/agent-jump-start/canonical-spec.yaml` |
 | Import one explicit skill package | `agent-jump-start import-skill --spec docs/agent-jump-start/canonical-spec.yaml --skill path/to/skill-directory` |
 | Add more managed agents later | `agent-jump-start update-agents --spec docs/agent-jump-start/canonical-spec.yaml --include github-copilot,aider` |
+| Remove managed agents from an existing setup | `agent-jump-start update-agents --spec docs/agent-jump-start/canonical-spec.yaml --remove windsurf,aider` |
+| Inspect valid canonical agent IDs | `agent-jump-start list-agents` |
+| Inspect canonical agent IDs with current project state | `agent-jump-start list-agents --spec docs/agent-jump-start/canonical-spec.yaml` |
 
 ## Supported Agents
 
@@ -490,6 +506,7 @@ References:
 agent-jump-start --help
 agent-jump-start --version
 agent-jump-start list-agents
+agent-jump-start list-agents --spec <path>
 agent-jump-start list-profiles
 
 agent-jump-start init [--profile <path>] [--target <path>] [--non-interactive] [--agents all|detected|<id,...>]
@@ -509,7 +526,7 @@ agent-jump-start import-skill --spec <path> --skill <path> [--replace]
 agent-jump-start add-skill <source> --spec <path> [--skill <name>] [--replace] [--provider <name>]
 agent-jump-start export-skill --spec <path> --slug <name> --output <path>
 agent-jump-start update-skills --spec <path> [--skill <slug>] [--dry-run]
-agent-jump-start update-agents --spec <path> [--include <id,...>] [--all-missing] [--mode all]
+agent-jump-start update-agents --spec <path> [--include <id,...>] [--remove <id,...>] [--all-missing] [--mode all]
 agent-jump-start export-schema [--output <path>]
 agent-jump-start demo-clean --target <path>
 agent-jump-start demo-tree --target <path>
@@ -534,6 +551,7 @@ The most reliable execution paths are the global `agent-jump-start` binary and v
 ## Current Limitations
 
 - `sync`, `render`, and `check` do not accept transient `--agents` overrides. Agent selection belongs to canonical spec state.
+- `sync --keep-existing` is now explicit about non-convergence: when preserved operator-authored files remain, the command exits `2` and expects a follow-up `absorb`, `sync --force`, or `sync --backup`.
 - `intake --import --replace` is provenance-safe. Upstream-tracked skills are not downgraded to local-only provenance.
 - Gemini, Amazon Q, Junie, Continue, Aider, Windsurf, Cline, and Roo Code do not receive native skill packages; they receive workspace guidance plus inline skill summaries.
 - `absorb` v1 intentionally targets `workspaceInstructions.sections` and `workspaceInstructions.validation` only.
@@ -555,7 +573,7 @@ If a team wants a different implementation language, it can preserve:
 npm test
 ```
 
-245 tests cover core workflows, sync convergence, overwrite protection, guided onboarding, inference, layered specs, leaf-only writeback, skill import and export, provenance lockfiles, absorb flows, grouped conflict prompts, selective agent support, and regression cases from real existing-repository adoption.
+256 tests cover core workflows, sync convergence, overwrite protection, guided onboarding, inference, layered specs, leaf-only writeback, skill import and export, provenance lockfiles, absorb flows, grouped conflict prompts, selective agent support, full agent lifecycle management, and regression cases from real existing-repository adoption.
 
 ## Contributing
 

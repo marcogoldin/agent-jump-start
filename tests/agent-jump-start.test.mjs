@@ -6233,16 +6233,19 @@ test("sync --backup creates timestamped backups before overwriting unmanaged fil
   }
 });
 
-test("sync --keep-existing leaves unmanaged files untouched and excludes them from the manifest", () => {
+test("sync --keep-existing leaves unmanaged files untouched, excludes them from manifest, and exits 2 (non-converged)", () => {
   const tempDir = makeTempDir();
   try {
     seedUnmanagedAgentFiles(tempDir);
     const specPath = writeSpec(tempDir, makeMinimalSpec());
 
     const result = runCli(["sync", "--spec", specPath, "--target", tempDir, "--keep-existing"]);
-    expectSuccess(result);
+    // D1 contract: sync --keep-existing exits 2 when preserved files prevent convergence
+    assert.equal(result.status, 2, `Expected exit code 2 (non-converged).\nSTDOUT:\n${result.stdout}\nSTDERR:\n${result.stderr}`);
     assertSentinelsIntact(tempDir);
-    assert.match(result.stdout, /Kept pre-existing operator-authored files|Kept operator-authored files/);
+    assert.match(result.stdout, /Kept.*operator-authored files/);
+    assert.match(result.stdout, /NOT fully converged/);
+    assert.match(result.stdout, /To converge, choose one of/);
 
     const manifest = JSON.parse(readFileSync(join(tempDir, "docs/agent-jump-start/generated-manifest.json"), "utf8"));
     assert.ok(!manifest.files.includes("CLAUDE.md"), "kept files must not be listed in the manifest");
@@ -6301,6 +6304,245 @@ test("manifest cleanStaleFiles never touches unmanaged adjacent files", () => {
     expectSuccess(result);
     assert.ok(existsSync(neighborPath), "unmanaged neighbor must survive cleanStaleFiles");
     assert.match(readFileSync(neighborPath, "utf8"), /SENTINEL-NEIGHBOR/);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// P0-D regression tests
+// ---------------------------------------------------------------------------
+
+// D1: sync --keep-existing exits 2 then sync --force converges to exit 0
+test("D1: sync --force converges after sync --keep-existing exits 2", () => {
+  const tempDir = makeTempDir();
+  try {
+    writeFileSync(join(tempDir, "CLAUDE.md"), "operator content\n", "utf8");
+    const specPath = writeSpec(tempDir, makeMinimalSpec());
+
+    // First sync with --keep-existing should exit 2
+    const keepResult = runCli(["sync", "--spec", specPath, "--target", tempDir, "--keep-existing"]);
+    assert.equal(keepResult.status, 2, "sync --keep-existing should exit 2 when files are kept");
+    assert.match(keepResult.stdout, /NOT fully converged/);
+
+    // Then sync --force should converge
+    const forceResult = runCli(["sync", "--spec", specPath, "--target", tempDir, "--force"]);
+    expectSuccess(forceResult);
+
+    // check should pass after force
+    const checkResult = runCli(["check", "--spec", specPath, "--target", tempDir]);
+    expectSuccess(checkResult);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+// D1: check hints about possibly-preserved files
+test("D1: check hints about preserved files when drift matches keep-existing pattern", () => {
+  const tempDir = makeTempDir();
+  try {
+    const specPath = writeSpec(tempDir, makeMinimalSpec());
+    // Render once
+    expectSuccess(runCli(["sync", "--spec", specPath, "--target", tempDir]));
+    // Replace CLAUDE.md with operator content (no provenance marker)
+    writeFileSync(join(tempDir, "CLAUDE.md"), "operator content\n", "utf8");
+    // check should fail and include hint
+    const result = runCli(["check", "--spec", specPath, "--target", tempDir]);
+    expectFailure(result);
+    assert.match(result.stdout, /no longer matches/);
+    assert.match(result.stdout, /Hint.*operator-authored/);
+    assert.match(result.stdout, /preserved/);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+// D2: update-agents --remove removes an enabled agent
+test("D2: update-agents --remove removes an enabled agent from spec", () => {
+  const tempDir = makeTempDir();
+  try {
+    const spec = makeMinimalSpec({
+      agentSupport: { mode: "selected", selected: ["claude-code", "cursor", "windsurf"] },
+    });
+    const specPath = writeSpec(tempDir, spec);
+
+    const result = runCli(["update-agents", "--spec", specPath, "--remove", "windsurf"]);
+    expectSuccess(result);
+    assert.match(result.stdout, /Removed.*Windsurf/);
+    assert.match(result.stdout, /Now supporting 2 of/);
+
+    const updated = JSON.parse(readFileSync(specPath, "utf8"));
+    assert.deepEqual(updated.agentSupport.selected.sort(), ["claude-code", "cursor"]);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+// D2: update-agents --remove rejects removing all agents
+test("D2: update-agents --remove rejects removing all agents", () => {
+  const tempDir = makeTempDir();
+  try {
+    const spec = makeMinimalSpec({
+      agentSupport: { mode: "selected", selected: ["claude-code"] },
+    });
+    const specPath = writeSpec(tempDir, spec);
+
+    const result = runCli(["update-agents", "--spec", specPath, "--remove", "claude-code"]);
+    expectFailure(result);
+    assert.match(result.stderr, /Cannot remove all agents/);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+// D2: update-agents --remove skips already-disabled agents
+test("D2: update-agents --remove skips already-disabled agents gracefully", () => {
+  const tempDir = makeTempDir();
+  try {
+    const spec = makeMinimalSpec({
+      agentSupport: { mode: "selected", selected: ["claude-code", "cursor"] },
+    });
+    const specPath = writeSpec(tempDir, spec);
+
+    const result = runCli(["update-agents", "--spec", specPath, "--remove", "windsurf"]);
+    expectSuccess(result);
+    assert.match(result.stdout, /Not currently enabled/);
+    assert.match(result.stdout, /No enabled agents to remove/);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+// D3: disabled-agent empty root directories are removed after sync
+test("D3: disabled-agent empty root directories are removed by sync", () => {
+  const tempDir = makeTempDir();
+  try {
+    const specPath = writeSpec(tempDir, makeMinimalSpec());
+    expectSuccess(runCli(["sync", "--spec", specPath, "--target", tempDir]));
+
+    // Narrow to selected agents
+    const narrowSpec = makeMinimalSpec({
+      agentSupport: { mode: "selected", selected: ["claude-code", "github-agents"] },
+    });
+    writeSpec(tempDir, narrowSpec);
+
+    // Create empty disabled-agent root directories (simulating previous render)
+    mkdirSync(join(tempDir, ".continue", "rules"), { recursive: true });
+    mkdirSync(join(tempDir, ".junie"), { recursive: true });
+
+    const result = runCli(["sync", "--spec", specPath, "--target", tempDir]);
+    expectSuccess(result);
+
+    // Empty roots should be removed
+    assert.ok(!existsSync(join(tempDir, ".continue")), ".continue/ should be removed when empty");
+    assert.ok(!existsSync(join(tempDir, ".junie")), ".junie/ should be removed when empty");
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+// D3: disabled-agent roots with unmanaged content are reported, not deleted
+test("D3: disabled-agent roots with unmanaged content are reported, not deleted", () => {
+  const tempDir = makeTempDir();
+  try {
+    const spec = makeMinimalSpec({
+      agentSupport: { mode: "selected", selected: ["claude-code", "github-agents"] },
+    });
+    const specPath = writeSpec(tempDir, spec);
+
+    // Create a disabled-agent root with unmanaged content
+    mkdirSync(join(tempDir, ".cursor", "rules"), { recursive: true });
+    writeFileSync(join(tempDir, ".cursor", "rules", "my-custom-rule.mdc"), "custom content\n", "utf8");
+
+    const result = runCli(["sync", "--spec", specPath, "--target", tempDir]);
+    expectSuccess(result);
+
+    // Root with content should NOT be deleted
+    assert.ok(existsSync(join(tempDir, ".cursor", "rules", "my-custom-rule.mdc")), ".cursor/ with content must survive");
+    // Should report the residual
+    assert.match(result.stdout, /Disabled-agent directories with unmanaged content/);
+    assert.match(result.stdout, /\.cursor\//);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+// D4: list-agents without --spec shows canonical IDs
+test("D4: list-agents shows canonical IDs in output", () => {
+  const result = runCli(["list-agents"]);
+  expectSuccess(result);
+  assert.match(result.stdout, /claude-code/);
+  assert.match(result.stdout, /github-copilot/);
+  assert.match(result.stdout, /cursor/);
+  assert.match(result.stdout, /ID/);
+});
+
+// D4: list-agents --spec shows enabled/disabled status
+test("D4: list-agents --spec shows enabled/disabled status", () => {
+  const tempDir = makeTempDir();
+  try {
+    const spec = makeMinimalSpec({
+      agentSupport: { mode: "selected", selected: ["claude-code", "cursor"] },
+    });
+    const specPath = writeSpec(tempDir, spec);
+
+    const result = runCli(["list-agents", "--spec", specPath]);
+    expectSuccess(result);
+    assert.match(result.stdout, /enabled/);
+    assert.match(result.stdout, /2 of 12 agents enabled/);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+// D4: list-agents --spec without agentSupport shows all enabled
+test("D4: list-agents --spec without agentSupport shows all enabled", () => {
+  const tempDir = makeTempDir();
+  try {
+    const specPath = writeSpec(tempDir, makeMinimalSpec());
+
+    const result = runCli(["list-agents", "--spec", specPath]);
+    expectSuccess(result);
+    assert.match(result.stdout, /All 12 agents enabled/);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+// Chatopac-runtime regression: narrowed repo with operator-authored files + disabled agent cleanup
+test("D1+D3 regression: narrowed repo sync --keep-existing exits 2, sync --force converges, disabled roots handled", () => {
+  const tempDir = makeTempDir();
+  try {
+    // Place operator-authored files BEFORE first render (simulating chatopac-runtime
+    // where the repo had pre-existing agent files before Agent Jump Start was adopted)
+    writeFileSync(join(tempDir, "CLAUDE.md"), "operator claude\n", "utf8");
+
+    // Place content in a disabled-agent root (pre-existing from prior tooling)
+    mkdirSync(join(tempDir, ".continue", "skills", "my-skill"), { recursive: true });
+    writeFileSync(join(tempDir, ".continue", "skills", "my-skill", "SKILL.md"), "custom skill\n", "utf8");
+
+    // Narrowed spec — only selected agents
+    const narrowSpec = makeMinimalSpec({
+      agentSupport: { mode: "selected", selected: ["claude-code", "github-copilot", "github-agents", "amazon-q"] },
+    });
+    const specPath = writeSpec(tempDir, narrowSpec);
+
+    // sync --keep-existing should exit 2 because CLAUDE.md is operator-authored
+    const keepResult = runCli(["sync", "--spec", specPath, "--target", tempDir, "--keep-existing"]);
+    assert.equal(keepResult.status, 2, `sync --keep-existing should exit 2.\nSTDOUT:\n${keepResult.stdout}\nSTDERR:\n${keepResult.stderr}`);
+    assert.match(keepResult.stdout, /NOT fully converged/);
+
+    // Disabled-agent root with content should be reported
+    assert.match(keepResult.stdout, /Disabled-agent directories with unmanaged content/);
+    assert.match(keepResult.stdout, /\.continue\//);
+
+    // sync --force should converge
+    const forceResult = runCli(["sync", "--spec", specPath, "--target", tempDir, "--force"]);
+    expectSuccess(forceResult);
+
+    // check should pass after force
+    const checkResult = runCli(["check", "--spec", specPath, "--target", tempDir]);
+    expectSuccess(checkResult);
   } finally {
     cleanupTempDir(tempDir);
   }
