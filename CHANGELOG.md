@@ -11,6 +11,24 @@ so versions are documented only where the history provides clear evidence.
 
 ## [Unreleased]
 
+## [2.0.2] - 2026-04-20
+
+### Fixed
+
+- Fixed the sync/check convergence contract so standalone `check` now agrees with `sync --keep-existing` on the same preserved state. Previously, `sync --keep-existing` exited `2` ("safe but non-converged") while a subsequent `check` against the same files exited `1` ("drift") because no persistent record distinguished operator-preserved paths from ordinary drift. The generated manifest now carries an optional `preserved[]` array (`{ path, preservedAt }`) that is written by `sync --keep-existing`, refreshed on repeated kept-path runs, pruned automatically when a path is overwritten by `sync --force`/`--backup` or absorbed into the spec, and re-validated every run against the on-disk classification (entries whose files are missing or now carry the provenance marker are dropped). `check` reads this set and splits its output into `FAIL` (genuine drift, exit `1`) and a new `Preserved (operator-authored)` section (intentional non-convergence, exit `2`). When both coexist, genuine drift wins and exit `1` is reported.
+- Fixed `import-skill`, `add-skill`, and `validate-skill` failing on SKILL.md files whose frontmatter uses YAML folded (`>`) or literal (`|`) block scalars. The internal zero-dependency YAML parser now recognises block scalar headers — including chomping (`-`, `+`), explicit indentation indicators, and optional trailing YAML comments (e.g. `description: > # note`) — so third-party skills that wrap long descriptions for readability no longer trip validation with the misleading "frontmatter.description is required and must be a non-empty string" error. Fields that are semantically single-line per the Anthropic SKILL.md convention (`name`, `description`, `license`, `author`, and common `metadata.*` labels) are additionally normalised to a clean one-line string so downstream consumers never receive embedded newlines.
+- Fixed silent data corruption where a block scalar header with a trailing inline comment (e.g. `description: > # comment`) was previously interpreted as the literal plain scalar `> # comment` and the indented body was dropped. The parser now strips the comment before matching the header so the body is consumed correctly.
+- Fixed folded block scalar (`>`) semantics to preserve line breaks around more-indented lines per YAML 1.2 (e.g. a `>` block containing an extra-indented code line now renders as `intro\n  step\noutro\n` instead of being flattened to a single space-separated line). Literal (`|`) scalars were already correct.
+- Improved the external SKILL.md frontmatter validator error messages to include the received value shape and, when the value is an empty object, an explicit hint that a malformed block scalar is the most likely cause.
+
+### Changed
+
+- Updated CLI usage text so the exit code contract documents both `sync` and `check` together: `0` converged, `1` failure/genuine drift, `2` safe but non-converged. This replaces the previous text that described the contract only for `sync`. No new flags or commands are introduced.
+
+### Notes
+
+This release rolls up everything that was previously staged under an internal `2.0.1` WIP tag on the `fix/yaml-block-scalars-in-skillmd` branch; no `2.0.1` package was published to npm. The manifest gains an optional `preserved[]` field that older Agent Jump Start versions ignore cleanly (forward-compatible). CI pipelines that currently treat any non-zero `check` exit as a failure continue to fail on exit `2` — which is the correct behavior because the project IS non-converged; the only change is that operators now get a coherent, actionable explanation instead of a confusing "drift" report for files they intentionally kept.
+
 ## [2.0.0] - 2026-04-18
 
 ### Added
