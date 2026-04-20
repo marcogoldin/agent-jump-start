@@ -11,6 +11,15 @@ so versions are documented only where the history provides clear evidence.
 
 ## [Unreleased]
 
+## [2.0.1] - 2026-04-20
+
+### Fixed
+
+- Fixed `import-skill`, `add-skill`, and `validate-skill` failing on SKILL.md files whose frontmatter uses YAML folded (`>`) or literal (`|`) block scalars. The internal zero-dependency YAML parser now recognises block scalar headers — including chomping (`-`, `+`), explicit indentation indicators, and optional trailing YAML comments (e.g. `description: > # note`) — so third-party skills that wrap long descriptions for readability no longer trip validation with the misleading "frontmatter.description is required and must be a non-empty string" error. Fields that are semantically single-line per the Anthropic SKILL.md convention (`name`, `description`, `license`, `author`, and common `metadata.*` labels) are additionally normalised to a clean one-line string so downstream consumers never receive embedded newlines.
+- Fixed silent data corruption where a block scalar header with a trailing inline comment (e.g. `description: > # comment`) was previously interpreted as the literal plain scalar `> # comment` and the indented body was dropped. The parser now strips the comment before matching the header so the body is consumed correctly.
+- Fixed folded block scalar (`>`) semantics to preserve line breaks around more-indented lines per YAML 1.2 (e.g. a `>` block containing an extra-indented code line now renders as `intro\n  step\noutro\n` instead of being flattened to a single space-separated line). Literal (`|`) scalars were already correct.
+- Improved the external SKILL.md frontmatter validator error messages to include the received value shape and, when the value is an empty object, an explicit hint that a malformed block scalar is the most likely cause.
+
 ## [2.0.0] - 2026-04-18
 
 ### Added
