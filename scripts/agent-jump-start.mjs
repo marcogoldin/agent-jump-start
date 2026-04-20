@@ -81,11 +81,11 @@ Overwrite protection (init, sync, render):
   --keep-existing    Leave pre-existing files untouched and skip those targets
   (Interactive TTY sessions will prompt per conflict group when none of the flags are set.)
 
-Exit codes (sync):
+Exit codes (sync, check):
   0  Fully converged — all files match the spec
   1  Failure — write errors, blocked files, or genuine drift
   2  Safe but non-converged — preserved files prevent full convergence
-     (standalone 'check' will report drift; use absorb/force/backup to converge)
+     (sync and check agree on this contract; use absorb/force/backup to converge)
 
 Examples:
   npx @marcogoldin/agent-jump-start@latest init \\

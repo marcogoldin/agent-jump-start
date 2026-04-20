@@ -6547,3 +6547,230 @@ test("D1+D3 regression: narrowed repo sync --keep-existing exits 2, sync --force
     cleanupTempDir(tempDir);
   }
 });
+
+// ---------------------------------------------------------------------------
+// P0-D convergence contract (manifest preserved[] + check exit 2)
+//
+// These tests exercise the sync/check convergence fix: sync --keep-existing
+// records preserved paths in the generated manifest so standalone check can
+// distinguish intentional operator preservation from genuine drift.
+// ---------------------------------------------------------------------------
+
+const MANIFEST_REL_PATH = "docs/agent-jump-start/generated-manifest.json";
+
+function readManifest(tempDir) {
+  return JSON.parse(readFileSync(join(tempDir, MANIFEST_REL_PATH), "utf8"));
+}
+
+test("P0-D: sync --keep-existing records preserved[] entries in the manifest", () => {
+  const tempDir = makeTempDir();
+  try {
+    writeFileSync(join(tempDir, "CLAUDE.md"), "operator claude\n", "utf8");
+    writeFileSync(join(tempDir, "AGENTS.md"), "operator agents\n", "utf8");
+    const specPath = writeSpec(tempDir, makeMinimalSpec());
+
+    const result = runCli(["sync", "--spec", specPath, "--target", tempDir, "--keep-existing"]);
+    assert.equal(result.status, 2, `sync --keep-existing should exit 2.\nSTDOUT:\n${result.stdout}\nSTDERR:\n${result.stderr}`);
+
+    const manifest = readManifest(tempDir);
+    assert.ok(Array.isArray(manifest.preserved), "manifest must carry preserved[] after sync --keep-existing");
+    const preservedPaths = manifest.preserved.map((e) => e.path).sort();
+    assert.deepEqual(preservedPaths, ["AGENTS.md", "CLAUDE.md"]);
+    for (const entry of manifest.preserved) {
+      assert.ok(typeof entry.preservedAt === "string" && entry.preservedAt.length > 0, "each preserved entry must carry a preservedAt timestamp");
+      assert.doesNotThrow(() => new Date(entry.preservedAt).toISOString());
+    }
+    assert.ok(!manifest.files.includes("CLAUDE.md"), "preserved paths must not also appear in manifest.files");
+    assert.ok(!manifest.files.includes("AGENTS.md"), "preserved paths must not also appear in manifest.files");
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("P0-D: check after sync --keep-existing exits 2 and reports a Preserved section", () => {
+  const tempDir = makeTempDir();
+  try {
+    writeFileSync(join(tempDir, "CLAUDE.md"), "operator claude\n", "utf8");
+    const specPath = writeSpec(tempDir, makeMinimalSpec());
+
+    const syncResult = runCli(["sync", "--spec", specPath, "--target", tempDir, "--keep-existing"]);
+    assert.equal(syncResult.status, 2);
+
+    const checkResult = runCli(["check", "--spec", specPath, "--target", tempDir]);
+    assert.equal(checkResult.status, 2, `check should exit 2 (preserved).\nSTDOUT:\n${checkResult.stdout}\nSTDERR:\n${checkResult.stderr}`);
+    assert.match(checkResult.stdout, /Preserved \(operator-authored/);
+    assert.match(checkResult.stdout, /CLAUDE\.md/);
+    assert.match(checkResult.stdout, /safe but non-converged/);
+    // Preserved files must not appear as FAIL drift
+    assert.doesNotMatch(checkResult.stdout, /FAIL[^\n]*CLAUDE\.md/);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("P0-D: check exits 1 when preserved state coexists with genuine drift on a managed file", () => {
+  const tempDir = makeTempDir();
+  try {
+    writeFileSync(join(tempDir, "CLAUDE.md"), "operator claude\n", "utf8");
+    const specPath = writeSpec(tempDir, makeMinimalSpec());
+
+    // First render everything and preserve CLAUDE.md
+    const syncResult = runCli(["sync", "--spec", specPath, "--target", tempDir, "--keep-existing"]);
+    assert.equal(syncResult.status, 2);
+
+    // Hand-edit a managed file so its provenance marker disappears — pure drift
+    const agentsPath = join(tempDir, "AGENTS.md");
+    writeFileSync(agentsPath, "hand-edited AGENTS without marker\n", "utf8");
+
+    const checkResult = runCli(["check", "--spec", specPath, "--target", tempDir]);
+    // Genuine drift dominates: exit 1, and both sections are reported
+    assert.equal(checkResult.status, 1, `check should exit 1 on genuine drift.\nSTDOUT:\n${checkResult.stdout}\nSTDERR:\n${checkResult.stderr}`);
+    assert.match(checkResult.stdout, /AGENTS\.md/);
+    assert.match(checkResult.stdout, /no longer matches/);
+    assert.match(checkResult.stdout, /Preserved \(operator-authored/);
+    assert.match(checkResult.stdout, /CLAUDE\.md/);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("P0-D: sync --force after a preserved run removes the entry from manifest.preserved[]", () => {
+  const tempDir = makeTempDir();
+  try {
+    writeFileSync(join(tempDir, "CLAUDE.md"), "operator claude\n", "utf8");
+    const specPath = writeSpec(tempDir, makeMinimalSpec());
+
+    const keepResult = runCli(["sync", "--spec", specPath, "--target", tempDir, "--keep-existing"]);
+    assert.equal(keepResult.status, 2);
+    const preservedBefore = readManifest(tempDir).preserved ?? [];
+    assert.ok(preservedBefore.some((e) => e.path === "CLAUDE.md"), "CLAUDE.md must be preserved before --force");
+
+    const forceResult = runCli(["sync", "--spec", specPath, "--target", tempDir, "--force"]);
+    expectSuccess(forceResult);
+
+    const manifestAfter = readManifest(tempDir);
+    const preservedAfter = manifestAfter.preserved ?? [];
+    assert.ok(!preservedAfter.some((e) => e.path === "CLAUDE.md"), "CLAUDE.md must be pruned from preserved[] after --force");
+    assert.ok(manifestAfter.files.includes("CLAUDE.md"), "CLAUDE.md must be back in manifest.files after --force");
+
+    // And standalone check must now converge
+    const checkResult = runCli(["check", "--spec", specPath, "--target", tempDir]);
+    expectSuccess(checkResult);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("P0-D: repeated sync --keep-existing refreshes preserved timestamps without duplicating entries", () => {
+  const tempDir = makeTempDir();
+  try {
+    writeFileSync(join(tempDir, "CLAUDE.md"), "operator claude\n", "utf8");
+    const specPath = writeSpec(tempDir, makeMinimalSpec());
+
+    const first = runCli(["sync", "--spec", specPath, "--target", tempDir, "--keep-existing"]);
+    assert.equal(first.status, 2);
+    const firstEntries = readManifest(tempDir).preserved ?? [];
+    const firstClaude = firstEntries.find((e) => e.path === "CLAUDE.md");
+    assert.ok(firstClaude, "CLAUDE.md must be preserved after first run");
+
+    // Second run — file is still unmanaged; entry should refresh, not duplicate.
+    const second = runCli(["sync", "--spec", specPath, "--target", tempDir, "--keep-existing"]);
+    assert.equal(second.status, 2);
+    const secondEntries = readManifest(tempDir).preserved ?? [];
+    const claudeEntries = secondEntries.filter((e) => e.path === "CLAUDE.md");
+    assert.equal(claudeEntries.length, 1, "CLAUDE.md must appear exactly once in preserved[] after repeated sync");
+
+    // Each path appears at most once across the whole array
+    const seen = new Set();
+    for (const entry of secondEntries) {
+      assert.ok(!seen.has(entry.path), `duplicate preserved entry for ${entry.path}`);
+      seen.add(entry.path);
+    }
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("P0-D: preserved entry is dropped from manifest if operator deletes the file on disk", () => {
+  const tempDir = makeTempDir();
+  try {
+    writeFileSync(join(tempDir, "CLAUDE.md"), "operator claude\n", "utf8");
+    const specPath = writeSpec(tempDir, makeMinimalSpec());
+
+    const keep = runCli(["sync", "--spec", specPath, "--target", tempDir, "--keep-existing"]);
+    assert.equal(keep.status, 2);
+    assert.ok((readManifest(tempDir).preserved ?? []).some((e) => e.path === "CLAUDE.md"));
+
+    // Operator deletes the preserved file between runs
+    rmSync(join(tempDir, "CLAUDE.md"));
+
+    // Next sync (without --keep-existing, no collision since file is gone)
+    // should render CLAUDE.md fresh and drop the stale preserved entry.
+    const next = runCli(["sync", "--spec", specPath, "--target", tempDir]);
+    expectSuccess(next);
+
+    const manifest = readManifest(tempDir);
+    assert.ok(!(manifest.preserved ?? []).some((e) => e.path === "CLAUDE.md"), "stale preserved entry must be pruned");
+    assert.ok(manifest.files.includes("CLAUDE.md"), "CLAUDE.md must be managed again after re-render");
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("P0-D: chatopac-shaped narrowed repo — sync --keep-existing exits 2 with preserved[] written, standalone check agrees", () => {
+  const tempDir = makeTempDir();
+  try {
+    // Simulate chatopac-runtime: pre-existing operator files across the
+    // selected agent ecosystems before Agent Jump Start was adopted.
+    writeFileSync(join(tempDir, "CLAUDE.md"), "operator claude\n", "utf8");
+    writeFileSync(join(tempDir, "AGENTS.md"), "operator agents\n", "utf8");
+    mkdirSync(join(tempDir, ".github"), { recursive: true });
+    writeFileSync(join(tempDir, ".github/copilot-instructions.md"), "operator copilot\n", "utf8");
+    mkdirSync(join(tempDir, ".amazonq/rules"), { recursive: true });
+    writeFileSync(join(tempDir, ".amazonq/rules/general.md"), "operator amazonq\n", "utf8");
+
+    // Narrowed spec: only the four agents relevant to chatopac-runtime.
+    const narrowSpec = makeMinimalSpec({
+      agentSupport: { mode: "selected", selected: ["claude-code", "github-copilot", "github-agents", "amazon-q"] },
+    });
+    const specPath = writeSpec(tempDir, narrowSpec);
+
+    const syncResult = runCli(["sync", "--spec", specPath, "--target", tempDir, "--keep-existing"]);
+    assert.equal(syncResult.status, 2, `sync --keep-existing should exit 2.\nSTDOUT:\n${syncResult.stdout}\nSTDERR:\n${syncResult.stderr}`);
+    assert.match(syncResult.stdout, /NOT fully converged/);
+
+    const manifest = readManifest(tempDir);
+    const preservedPaths = (manifest.preserved ?? []).map((e) => e.path).sort();
+    assert.deepEqual(preservedPaths, [
+      ".amazonq/rules/general.md",
+      ".github/copilot-instructions.md",
+      "AGENTS.md",
+      "CLAUDE.md",
+    ]);
+
+    // Sentinels intact — operator content is preserved byte-for-byte.
+    assert.equal(readFileSync(join(tempDir, "CLAUDE.md"), "utf8"), "operator claude\n");
+    assert.equal(readFileSync(join(tempDir, "AGENTS.md"), "utf8"), "operator agents\n");
+    assert.equal(readFileSync(join(tempDir, ".github/copilot-instructions.md"), "utf8"), "operator copilot\n");
+    assert.equal(readFileSync(join(tempDir, ".amazonq/rules/general.md"), "utf8"), "operator amazonq\n");
+
+    // Standalone check must now agree with sync: exit 2, Preserved section.
+    const checkResult = runCli(["check", "--spec", specPath, "--target", tempDir]);
+    assert.equal(checkResult.status, 2, `check should exit 2 (preserved).\nSTDOUT:\n${checkResult.stdout}\nSTDERR:\n${checkResult.stderr}`);
+    assert.match(checkResult.stdout, /Preserved \(operator-authored/);
+    for (const p of preservedPaths) {
+      assert.ok(checkResult.stdout.includes(p), `check preserved section must list ${p}`);
+    }
+    assert.match(checkResult.stdout, /safe but non-converged/);
+
+    // sync --force then check must both converge to 0.
+    const forceResult = runCli(["sync", "--spec", specPath, "--target", tempDir, "--force"]);
+    expectSuccess(forceResult);
+    const finalCheck = runCli(["check", "--spec", specPath, "--target", tempDir]);
+    expectSuccess(finalCheck);
+    const finalManifest = readManifest(tempDir);
+    assert.ok(!Array.isArray(finalManifest.preserved) || finalManifest.preserved.length === 0, "preserved[] must be empty after --force converges");
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
