@@ -247,6 +247,36 @@ agent-jump-start check --spec docs/agent-jump-start/canonical-spec.yaml --target
 agent-jump-start render --spec docs/agent-jump-start/canonical-spec.yaml --target . --clean
 ```
 
+### After upgrading Agent Jump Start
+
+A new Agent Jump Start release updates the generator. Your repository updates only when you run the maintenance commands again.
+
+That is the model:
+
+- upgrading the CLI gives you the new engine
+- running `sync` applies that engine to the repository
+- running `check` proves the repository is aligned with the canonical spec
+
+Use this flow after installing a newer release:
+
+```bash
+# Optional: refresh upstream-tracked skills first
+agent-jump-start update-skills \
+  --spec docs/agent-jump-start/canonical-spec.yaml
+
+# Rewrite the managed output set with the new generator version
+agent-jump-start sync \
+  --spec docs/agent-jump-start/canonical-spec.yaml \
+  --target .
+
+# Confirm the repository is fully aligned
+agent-jump-start check \
+  --spec docs/agent-jump-start/canonical-spec.yaml \
+  --target .
+```
+
+If you only upgrade the global package or switch to `npx @latest`, the repository will still contain the previously generated files until you run this flow.
+
 ## Common Commands
 
 | If you want to... | Command |
@@ -315,7 +345,32 @@ Supported import sources:
 - an installed local skill package
 - a legacy JSON skill file
 
+During import, display-style skill names in `SKILL.md` frontmatter are normalized
+to canonical slugs automatically. For example, `name: Python Pro` becomes
+`python-pro` in canonical memory while the human-readable title remains
+`Python Pro`.
+
 Each successful import updates `agent-jump-start.lock.json` next to the spec. The lockfile records slug, version, checksum, source, and resolved path.
+
+### Validate a skill before import
+
+Use `validate-skill` to check whether a skill is structurally valid and
+canonically import-compatible before writing it into the spec.
+
+```bash
+agent-jump-start validate-skill path/to/skill-directory
+agent-jump-start validate-skill path/to/SKILL.md
+agent-jump-start validate-skill path/to/SKILL.md --frontmatter-only
+```
+
+Default behavior:
+
+- checks the same canonical import-compatibility path used by `import-skill`
+- works for both skill directories and standalone `SKILL.md` files
+- exits `0` only when canonical import would accept the skill
+
+`--frontmatter-only` is the opt-in legacy path when you want only the old
+frontmatter shape check in CI.
 
 ### Adopt locally installed skills
 
@@ -520,7 +575,7 @@ agent-jump-start render --spec <path> [--target <path>] [--clean] [--force | --b
 agent-jump-start check --spec <path> [--target <path>]
 agent-jump-start validate --spec <path>
 
-agent-jump-start validate-skill <path>
+agent-jump-start validate-skill <path> [--frontmatter-only]
 agent-jump-start intake --spec <path> [--target <path>] [--import] [--replace]
 agent-jump-start import-skill --spec <path> --skill <path> [--replace]
 agent-jump-start add-skill <source> --spec <path> [--skill <name>] [--replace] [--provider <name>]
@@ -548,11 +603,14 @@ agent-jump-start demo-tree --target <path>
 
 The most reliable execution paths are the global `agent-jump-start` binary and vendored usage via `node docs/agent-jump-start/scripts/agent-jump-start.mjs`.
 
+Installing a newer Agent Jump Start version updates the generator on your machine. It does not rewrite files that were already generated inside a repository. After upgrading, run the repository maintenance flow in that repo so the generated outputs, manifest, and managed skills all move to the new release together.
+
 ## Current Limitations
 
 - `sync`, `render`, and `check` do not accept transient `--agents` overrides. Agent selection belongs to canonical spec state.
 - `sync --keep-existing` is now explicit about non-convergence: when preserved operator-authored files remain, the command exits `2` and expects a follow-up `absorb`, `sync --force`, or `sync --backup`.
 - `intake --import --replace` is provenance-safe. Upstream-tracked skills are not downgraded to local-only provenance.
+- `validate-skill --frontmatter-only` is intentionally weaker than the default canonical import check and exists only for legacy CI workflows that still want the old frontmatter-only contract.
 - Gemini, Amazon Q, Junie, Continue, Aider, Windsurf, Cline, and Roo Code do not receive native skill packages; they receive workspace guidance plus inline skill summaries.
 - `absorb` v1 intentionally targets `workspaceInstructions.sections` and `workspaceInstructions.validation` only.
 - direct `npx @marcogoldin/agent-jump-start@latest ...` execution may vary across npm environments; global install and vendored usage are the most reliable paths.

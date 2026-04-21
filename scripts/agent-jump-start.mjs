@@ -54,7 +54,7 @@ Commands:
   validate       --spec <path>
   validate-skill <path> [--frontmatter-only]
                  (SKILL.md file or skill directory; default runs the same
-                 two-stage check intake does)
+                 canonical import-compatibility check used by intake/import-skill)
   intake         --spec <path> [--target <path>] [--import] [--replace]
   import-skill   --spec <path> --skill <path> [--replace]
   add-skill      <source> --spec <path> [--skill <name>] [--replace] [--provider <name>]
