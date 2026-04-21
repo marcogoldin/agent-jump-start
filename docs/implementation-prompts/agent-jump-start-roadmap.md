@@ -25,39 +25,6 @@ Already shipped or closed-local items have been removed from here and belong in
 
 ---
 
-## Proposed P0-C.3 — Interactive Terminal UX Decision
-
-**User outcome:** interactive TTY sessions feel materially more legible and easier to operate, with a clear decision about whether Agent Jump Start should stay zero-dependency or adopt a very small CLI UX dependency set.
-
-Why this is P0:
-
-- The current terminal interaction is materially less fluid than modern CLI tools that provide arrow-key selection, clearer confirmation states, and stronger visual guidance.
-- TUI work touches startup time, TTY fallback, SIGINT teardown, and color semantics, so it should be isolated as a product and engineering decision.
-
-Build next:
-
-- Evaluate native `node:readline` plus raw mode versus a small dependency-backed TUI.
-- Define explicit acceptance criteria for:
-  - arrow-key navigation
-  - `NO_COLOR`
-  - TTY fallback
-  - SIGINT teardown
-  - startup-time budget
-- Choose one implementation direction and document why.
-
-Done when:
-
-- the dependency decision is explicit and documented;
-- the chosen path has measurable startup expectations;
-- TTY versus non-TTY behavior is defined before implementation work begins.
-
-Non-goals:
-
-- no shipping half of a TUI without the corresponding teardown and fallback rules;
-- no hidden dependency growth justified only by aesthetics.
-
----
-
 ## Proposed P0-C.5 — Local Skill Diagnostics for `sync` and `intake`
 
 **User outcome:** when a local skill is discovered but not yet canonicalized or mirrored, the CLI explains that state immediately and points to the exact next command instead of forcing the operator to infer what happened.
@@ -600,12 +567,11 @@ Non-goals:
 
 ## Ordered Execution (from now)
 
-1. Proposed P0-C.3 interactive terminal UX decision.
-2. Proposed P0-C.5 local-skill diagnostics for `sync` and `intake`.
-3. Proposed P0-D selective agent support.
-4. Proposed P0-E complete agent selection lifecycle.
-5. P2 skill semantics parity and diagnostics.
-6. P3 CI/release trust contract.
-7. P4 non-software expansion.
+1. Proposed P0-C.5 local-skill diagnostics for `sync` and `intake`.
+2. Proposed P0-D selective agent support.
+3. Proposed P0-E complete agent selection lifecycle.
+4. P2 skill semantics parity and diagnostics.
+5. P3 CI/release trust contract.
+6. P4 non-software expansion.
 
 Cross-cutting requirement: any change in these priorities must preserve shipped trust guardrails (`preserve`, `absorb`, layered leaf-only writeback) and keep `npm test` + smoke suites green.

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import test from "node:test";
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync, mkdirSync, existsSync, chmodSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -10,7 +11,7 @@ import { mergeByKey, mergeSpecLayers, resolveLayeredSpec, resolveLayeredSpecWith
 import { validateSpec } from "../lib/validation.mjs";
 import { discoverUnmanagedSkills } from "../lib/intake.mjs";
 import { findSkillCandidates } from "../lib/skills.mjs";
-import { reviewSuggestedEntries, normalizeChoiceDefinitions, formatChoiceHint, resolveChoiceInput } from "../lib/interactive.mjs";
+import { reviewSuggestedEntries, normalizeChoiceDefinitions, formatChoiceHint, resolveChoiceInput, chooseWithRawMode, supportsRawModeChoice } from "../lib/interactive.mjs";
 
 const scriptPath = resolve("scripts/agent-jump-start.mjs");
 
@@ -5279,6 +5280,113 @@ test("interactive choice helpers render explicit bulk review labels and accept k
   assert.equal(resolveChoiceInput("review", choices, "y"), "r");
   assert.equal(resolveChoiceInput("skip", choices, "y"), "n");
   assert.equal(resolveChoiceInput("", choices, "y"), "y");
+});
+
+function makeRawModeHarness() {
+  class FakeInput extends EventEmitter {
+    constructor() {
+      super();
+      this.rawModeCalls = [];
+      this.pauseCalls = 0;
+      this.resumeCalls = 0;
+    }
+
+    setRawMode(enabled) {
+      this.rawModeCalls.push(enabled);
+    }
+  }
+
+  class FakeOutput {
+    constructor() {
+      this.chunks = [];
+    }
+
+    write(chunk) {
+      this.chunks.push(chunk);
+      return true;
+    }
+  }
+
+  const input = new FakeInput();
+  const output = new FakeOutput();
+
+  return {
+    input,
+    output,
+    pause: () => { input.pauseCalls += 1; },
+    resume: () => { input.resumeCalls += 1; },
+  };
+}
+
+test("supportsRawModeChoice disables raw-mode TTY menus when NO_COLOR is set", () => {
+  assert.equal(supportsRawModeChoice({ setRawMode() {} }, { NO_COLOR: "1" }), false);
+  assert.equal(supportsRawModeChoice({ setRawMode() {} }, {}), true);
+  assert.equal(supportsRawModeChoice({}, {}), false);
+});
+
+test("chooseWithRawMode accepts descriptive typed aliases before Enter", async () => {
+  const { input, output, pause, resume } = makeRawModeHarness();
+  const choices = normalizeChoiceDefinitions([
+    { key: "y", label: "keep all", aliases: ["yes", "keep", "accept all"] },
+    { key: "r", label: "review one by one", aliases: ["review", "review individually", "one by one"] },
+    { key: "n", label: "skip all", aliases: ["no", "skip"] },
+  ]);
+
+  const pendingChoice = chooseWithRawMode({
+    question: "Choose review mode",
+    choiceDefinitions: choices,
+    defaultChoice: "y",
+    input,
+    output,
+    pause,
+    resume,
+    prepareInput: () => {},
+    exitFn: () => { throw new Error("exit should not be called"); },
+  });
+
+  for (const letter of "review") {
+    input.emit("keypress", letter, { name: letter });
+  }
+  input.emit("keypress", "\r", { name: "return" });
+
+  const resolved = await pendingChoice;
+  assert.equal(resolved, "r");
+  assert.deepEqual(input.rawModeCalls, [true, false]);
+  assert.equal(input.pauseCalls, 1);
+  assert.equal(input.resumeCalls, 1);
+  assert.equal(input.listenerCount("keypress"), 0);
+  assert.match(output.chunks.join(""), /typed: review/);
+});
+
+test("chooseWithRawMode keeps arrow navigation while preserving typed prompt behavior", async () => {
+  const { input, output, pause, resume } = makeRawModeHarness();
+  const choices = normalizeChoiceDefinitions([
+    { key: "y", label: "yes", aliases: ["yes", "ok"] },
+    { key: "e", label: "edit a field", aliases: ["edit", "fix"] },
+    { key: "n", label: "abort", aliases: ["no", "cancel"] },
+  ]);
+
+  const pendingChoice = chooseWithRawMode({
+    question: "Looks right?",
+    choiceDefinitions: choices,
+    defaultChoice: "y",
+    input,
+    output,
+    pause,
+    resume,
+    prepareInput: () => {},
+    exitFn: () => { throw new Error("exit should not be called"); },
+  });
+
+  input.emit("keypress", "", { name: "down" });
+  input.emit("keypress", "", { name: "down" });
+  input.emit("keypress", "\r", { name: "return" });
+
+  const resolved = await pendingChoice;
+  assert.equal(resolved, "n");
+  assert.deepEqual(input.rawModeCalls, [true, false]);
+  assert.equal(input.listenerCount("keypress"), 0);
+  assert.match(output.chunks.join(""), /use ↑\/↓, j\/k, or type a choice then press Enter/);
 });
 
 test("reviewSuggestedEntries returns accepted items and detailed bulk stats", async () => {

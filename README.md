@@ -99,6 +99,16 @@ The guided flow reviews:
 
 Every suggestion carries provenance so the operator can see whether it was detected or inferred.
 
+In interactive TTY sessions, choice prompts now support:
+
+- arrow-key navigation
+- `j` / `k` navigation
+- typed shortcuts and aliases such as `y`, `n`, `edit`, or `review`
+
+When stdin is not a TTY, or when `NO_COLOR` is set, prompts fall back to the
+plain line-based behavior so CI, piping, and low-capability terminals remain
+deterministic.
+
 ## Selective Agent Support
 
 Agent Jump Start can manage all supported agents or a chosen subset.
@@ -599,6 +609,7 @@ agent-jump-start demo-tree --target <path>
 - Node.js >= 18
 - npm for installation and distribution
 - no runtime dependencies required
+- interactive TTY menus stay zero-dependency and use the native Node.js terminal APIs
 
 ## Installation Options
 
