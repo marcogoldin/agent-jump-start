@@ -18,97 +18,10 @@ Shipped details belong to `CHANGELOG.md`, not here.
 
 ## Current Status (2026-04-21)
 
-Closed locally and now baseline behavior:
+This file now lists only remaining roadmap work.
 
-- P0-A: discovery + propagation coverage expansion for major pre-existing agent file formats.
-- P0-B: guided `absorb` flow to merge unmanaged pre-existing instructions into canonical spec.
-- P0-C.1: canonical import trust for skills. `validate-skill` now runs the same two-stage canonical import pipeline used by `intake` and `import-skill` (frontmatter shape + canonical reconstruction) for both skill directories and standalone `SKILL.md` files, reports three explicit outcomes (`import-compatible`, `structurally-valid`, `frontmatter-invalid`), and keeps `--frontmatter-only` as the opt-in legacy CI shape check.
-- P0-C.4: external skill canonicalization baseline. Display-style `name:` values from third-party `SKILL.md` files, such as `Python Pro`, are now normalized automatically into canonical slugs such as `python-pro` during conversion, so the operator no longer needs to hand-edit frontmatter just to satisfy the slug regex.
-- P1: preserve unmanaged pre-existing files by default across `init` / `sync` / `render`.
-
-P0 candidate now under review:
-
-- P0-C.2: first-run `init` copy for low-signal repos (starter preset vs stack hint vs generic/skip vs abort) with no TUI dependency yet.
-- P0-C.3: interactive terminal UX decision — native `node:readline` raw mode vs small dependency — evaluated as an isolated spike with startup-time budget, TTY fallback, `NO_COLOR`, and SIGINT teardown as explicit acceptance criteria.
-- P0-C.5: local-skill diagnostics for `sync` and `intake`, so operators immediately understand why a discovered local skill is not yet canonicalized or mirrored.
-- P0-D: selective agent support during onboarding and later project evolution, so existing repos can start narrow instead of always inheriting all supported agents.
-- P0-E: complete the selective-agent lifecycle for already initialized projects, including safe removal, transparent agent naming, and convergence-safe maintenance flows.
-
-Execution rule for closed areas: keep them under regression tests; reopen only on verified regressions.
-
----
-
-## Proposed P0-C.2 — First-Run `init` Copy for Low-Signal Repositories
-
-**User outcome:** a non-expert can initialize a generic or script-heavy repository and understand the onboarding choices immediately, without hidden knowledge of starter presets, raw stack tokens, or `skip`.
-
-Why this is P0:
-
-- The first-run experience is the trust boundary for the whole product.
-- A repo with weak stack signals currently falls into an onboarding flow that feels narrower and less transparent than the actual capability of the tool.
-- The current CLI asks the operator to infer hidden semantics such as raw stack names versus starter presets versus `skip`.
-
-Product principles for this feature:
-
-- The first-run path must teach the product model while the user is using it.
-- Generic repositories are first-class, not edge cases.
-
-### User-first Flow
-
-#### 1. `init` must make generic repositories feel intentional
-
-For repositories with weak or mixed stack signals, the operator should immediately understand that there are three different kinds of choices:
-
-- a starter preset
-- a stack hint
-- a generic draft
-
-The prompt should not force the user to discover this model by trial and error.
-
-In particular:
-
-- `Other` must not feel like a dead end that still depends on hidden input conventions.
-- raw stack names such as `python` must be explained directly in the prompt copy if they are supported.
-- `skip` must be framed as a valid recommended path for generic or script-based repositories, not as a hidden escape hatch.
-- when confidence is low, the CLI should say what it recommends and why.
-
-### CLI Proposal
-
-#### `init`
-
-Improve the first prompt so it explicitly surfaces:
-
-- starter presets
-- raw stack hints
-- generic draft / `skip`
-- abort
-
-Required UX characteristics:
-
-- low-signal repos get a friendly recommended path;
-- `Other` becomes a guided branch, not just a preset dump;
-- confirmation screens summarize what the tool inferred versus what the operator chose.
-
-### Engineering Approach
-
-Build in this order:
-
-1. Redesign the product copy and operator model for low-signal `init` flows.
-2. Keep the interactive copy zero-dependency and text-first for this step.
-3. Add regression fixtures for generic repo onboarding and low-signal prompts.
-
-### Done When
-
-- a generic repository with a few Python scripts can complete `init` without hidden knowledge of raw stack tokens;
-- the prompt clearly explains starter presets, stack hints, `skip`, and abort;
-- the flow stays deterministic in non-interactive and CI usage;
-- no TUI dependency is required to ship this copy improvement.
-
-### Non-goals
-
-- no arrow-key or raw-mode terminal UX in this step;
-- no dependency decision in this step;
-- no changes to skill validation or import contracts in this step.
+Already shipped or closed-local items have been removed from here and belong in
+`CHANGELOG.md`.
 
 ---
 
@@ -687,13 +600,12 @@ Non-goals:
 
 ## Ordered Execution (from now)
 
-1. Proposed P0-C.2 first-run `init` copy for low-signal repos.
-2. Proposed P0-C.3 interactive terminal UX decision.
-3. Proposed P0-C.5 local-skill diagnostics for `sync` and `intake`.
-4. Proposed P0-D selective agent support.
-5. Proposed P0-E complete agent selection lifecycle.
-6. P2 skill semantics parity and diagnostics.
-7. P3 CI/release trust contract.
-8. P4 non-software expansion.
+1. Proposed P0-C.3 interactive terminal UX decision.
+2. Proposed P0-C.5 local-skill diagnostics for `sync` and `intake`.
+3. Proposed P0-D selective agent support.
+4. Proposed P0-E complete agent selection lifecycle.
+5. P2 skill semantics parity and diagnostics.
+6. P3 CI/release trust contract.
+7. P4 non-software expansion.
 
 Cross-cutting requirement: any change in these priorities must preserve shipped trust guardrails (`preserve`, `absorb`, layered leaf-only writeback) and keep `npm test` + smoke suites green.
