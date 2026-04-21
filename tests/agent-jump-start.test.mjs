@@ -3442,6 +3442,7 @@ test("init --guided rejects unknown stack tokens and keeps re-asking until a val
     assert.equal(result.status, 0,
       `Expected success.\nSTDOUT:\n${result.stdout}\nSTDERR:\n${result.stderr}`);
     assert.match(result.stdout, /Unknown stack\/preset/);
+    assert.match(result.stdout, /Type a raw stack name like "python", a preset slug, "skip" for a generic draft, or "abort" to stop\./);
     assert.doesNotMatch(result.stdout, /Too many invalid entries/);
     const specPath = join(tempDir, "docs/agent-jump-start/canonical-spec.yaml");
     const spec = JSON.parse(readFileSync(specPath, "utf8"));
@@ -5346,6 +5347,37 @@ test("init --guided supports greenfield stack choices and produces non-generic s
   }
 });
 
+test("init --guided low-signal prompt teaches raw stack names and recommends skip", () => {
+  const tempDir = makeTempDir();
+  try {
+    const result = spawnSync(process.execPath, [
+      scriptPath, "init", "--guided", "--target", tempDir,
+    ], { encoding: "utf8", input: "\n" });
+
+    expectFailure(result);
+    assert.match(result.stdout, /Choose one path:/);
+    assert.match(result.stdout, /stack name: e\.g\. "python"/);
+    assert.match(result.stdout, /Recommended for a generic or script-based repo: type "skip"\./);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("init --guided explains the Other branch as raw stack or generic draft guidance", () => {
+  const tempDir = makeTempDir();
+  try {
+    const result = spawnSync(process.execPath, [
+      scriptPath, "init", "--guided", "--target", tempDir,
+    ], { encoding: "utf8", input: "6\n\n" });
+
+    expectFailure(result);
+    assert.match(result.stdout, /"Other" is for repos that do not fit a starter preset yet\./);
+    assert.match(result.stdout, /Type a stack name like "python", choose a preset slug, type "skip" for a generic draft, or "abort" to stop\./);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
 test("init --guided supports opinionated starter presets beyond Node and Python", () => {
   const tempDir = makeTempDir();
   try {
@@ -5401,7 +5433,8 @@ test("init --guided normalizes raw stack aliases and seeds non-preset ecosystems
     assert.ok(spec.workspaceInstructions.sections.some((section) => section.title === "Go rules"));
     assert.ok(spec.workspaceInstructions.sections.some((section) => section.title === "Ruby rules"));
     assert.match(result.stdout, /Pick a starter:/);
-    assert.match(result.stdout, /Type a number \(1-6\), a preset slug, or a stack name/i);
+    assert.match(result.stdout, /Choose one path:/);
+    assert.match(result.stdout, /stack name: e\.g\. "python"/);
   } finally {
     cleanupTempDir(tempDir);
   }

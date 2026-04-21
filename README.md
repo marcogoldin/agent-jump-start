@@ -80,6 +80,13 @@ Guided onboarding can inspect repository signals such as:
 - lint and formatting configs
 - local conventions in repository docs
 
+When no dominant stack is detected, the guided flow also supports three
+first-run paths directly from the prompt:
+
+- choose a starter category or preset
+- type a raw stack name such as `python`
+- type `skip` for a generic draft when the repo is still script-based or mixed
+
 The guided flow reviews:
 
 - project name and summary
