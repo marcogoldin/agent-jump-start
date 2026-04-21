@@ -52,7 +52,9 @@ Commands:
                  [--force | --backup | --keep-existing]
   check          --spec <path> [--target <path>]
   validate       --spec <path>
-  validate-skill <path>   (SKILL.md file or skill directory)
+  validate-skill <path> [--frontmatter-only]
+                 (SKILL.md file or skill directory; default runs the same
+                 two-stage check intake does)
   intake         --spec <path> [--target <path>] [--import] [--replace]
   import-skill   --spec <path> --skill <path> [--replace]
   add-skill      <source> --spec <path> [--skill <name>] [--replace] [--provider <name>]

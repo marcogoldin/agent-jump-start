@@ -11,6 +11,15 @@ so versions are documented only where the history provides clear evidence.
 
 ## [Unreleased]
 
+### Changed
+
+- P0-C.1 — `validate-skill` now runs the same two-stage validation pipeline that `intake` uses, so a skill accepted by `validate-skill` is guaranteed to be accepted by `intake --import`. Stage 1 is the existing SKILL.md frontmatter check; stage 2 rebuilds the canonical skill via `readSkillDirectory`/`validateSkill` and surfaces any canonical errors that would otherwise only appear later during import. Three explicit outcomes are reported: `import-compatible` (exit 0), `structurally-valid but NOT import-compatible` (exit 1 — frontmatter fine, canonical rebuild fails, error list matches what intake would emit), and `frontmatter-invalid` (exit 1 — missing or malformed frontmatter). This closes the real-world trust breach where a third-party skill whose `name` is title-case (e.g. ecosystems like skillfish) passed `validate-skill` and was then rejected by `intake` on the `slug must be lowercase and use hyphens only` rule.
+- Added `validate-skill --frontmatter-only` as an opt-in legacy flag for CI pipelines that only want the pre-parity frontmatter shape check. Default behavior is now strict; `--frontmatter-only` prints an explicit note that the canonical compatibility check was skipped. Standalone `.md` files (pointed at a single `SKILL.md` file rather than a directory) continue to run frontmatter-only by necessity, with a note explaining that canonical reconstruction requires the surrounding directory.
+
+### Notes
+
+- The `validate-skill` exit code contract remains binary (0 = accept, 1 = reject). Skills that used to pass only because the canonical check was missing now fail, which is correct — those same skills would have failed at import time. Operators who need the old permissive behavior can add `--frontmatter-only`.
+
 ## [2.0.2] - 2026-04-20
 
 ### Fixed
