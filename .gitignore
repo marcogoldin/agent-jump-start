@@ -162,6 +162,8 @@ coverage/
 .project/
 docs/*
 !docs/layered-specs.md
+# Local planning prompts are scratchpad material:
+# keep them on disk if useful, but never track them in git.
 docs/implementation-prompts/
 *.bak
 *.orig
