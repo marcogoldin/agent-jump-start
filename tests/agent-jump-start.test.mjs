@@ -11,7 +11,8 @@ import { mergeByKey, mergeSpecLayers, resolveLayeredSpec, resolveLayeredSpecWith
 import { validateSpec } from "../lib/validation.mjs";
 import { discoverUnmanagedSkills } from "../lib/intake.mjs";
 import { findSkillCandidates } from "../lib/skills.mjs";
-import { reviewSuggestedEntries, normalizeChoiceDefinitions, formatChoiceHint, resolveChoiceInput, chooseWithRawMode, supportsRawModeChoice } from "../lib/interactive.mjs";
+import { reviewSuggestedEntries, normalizeChoiceDefinitions, formatChoiceHint, resolveChoiceInput, chooseWithRawMode, supportsRawModeChoice, selectManyWithRawMode, pickAgentsInteractively } from "../lib/interactive.mjs";
+import { AGENT_DISPLAY_CATALOG } from "../lib/agent-targets.mjs";
 
 const scriptPath = resolve("scripts/agent-jump-start.mjs");
 
@@ -5389,6 +5390,270 @@ test("chooseWithRawMode keeps arrow navigation while preserving typed prompt beh
   assert.match(output.chunks.join(""), /use ↑\/↓, j\/k, or type a choice then press Enter/);
 });
 
+// ---------------------------------------------------------------------------
+// P0-C.4 — multi-select checklist (selectManyWithRawMode)
+// ---------------------------------------------------------------------------
+
+function makeAgentItems(slugs) {
+  return slugs.map((slug) => ({ key: slug, label: slug, sublabel: slug, detail: "" }));
+}
+
+test("selectManyWithRawMode toggles focused item with Space and confirms with Enter", async () => {
+  const { input, output, pause, resume } = makeRawModeHarness();
+  const items = makeAgentItems(["claude-code", "github-copilot", "cursor"]);
+
+  const pending = selectManyWithRawMode({
+    question: "Select agents to support",
+    items,
+    initiallySelected: new Set(),
+    input,
+    output,
+    pause,
+    resume,
+    prepareInput: () => {},
+    exitFn: () => { throw new Error("exit should not be called"); },
+  });
+
+  input.emit("keypress", " ", { name: "space" });
+  input.emit("keypress", "", { name: "down" });
+  input.emit("keypress", " ", { name: "space" });
+  input.emit("keypress", "\r", { name: "return" });
+
+  const resolved = await pending;
+  assert.deepEqual([...resolved].sort(), ["claude-code", "github-copilot"]);
+  assert.deepEqual(input.rawModeCalls, [true, false]);
+  assert.equal(input.listenerCount("keypress"), 0);
+  assert.match(output.chunks.join(""), /Select agents to support/);
+  assert.match(output.chunks.join(""), /\[x\] claude-code/);
+  assert.match(output.chunks.join(""), /2 agents selected/);
+});
+
+test("selectManyWithRawMode honors initiallySelected set for default checkboxes", async () => {
+  const { input, output, pause, resume } = makeRawModeHarness();
+  const items = makeAgentItems(["claude-code", "github-copilot", "cursor"]);
+
+  const pending = selectManyWithRawMode({
+    question: "Select agents",
+    items,
+    initiallySelected: new Set(["github-copilot"]),
+    input,
+    output,
+    pause,
+    resume,
+    prepareInput: () => {},
+    exitFn: () => { throw new Error("exit should not be called"); },
+  });
+
+  input.emit("keypress", "\r", { name: "return" });
+
+  const resolved = await pending;
+  assert.deepEqual([...resolved], ["github-copilot"]);
+});
+
+test("selectManyWithRawMode select-all ('a') marks every row", async () => {
+  const { input, output, pause, resume } = makeRawModeHarness();
+  const items = makeAgentItems(["a1", "a2", "a3"]);
+
+  const pending = selectManyWithRawMode({
+    question: "Select agents",
+    items,
+    initiallySelected: new Set(),
+    input,
+    output,
+    pause,
+    resume,
+    prepareInput: () => {},
+    exitFn: () => { throw new Error("exit should not be called"); },
+  });
+
+  input.emit("keypress", "a", { name: "a" });
+  input.emit("keypress", "\r", { name: "return" });
+
+  const resolved = await pending;
+  assert.deepEqual([...resolved].sort(), ["a1", "a2", "a3"]);
+});
+
+test("selectManyWithRawMode clear-all ('n') followed by Enter refuses to confirm empty selection", async () => {
+  const { input, output, pause, resume } = makeRawModeHarness();
+  const items = makeAgentItems(["a1", "a2"]);
+
+  const pending = selectManyWithRawMode({
+    question: "Select agents",
+    items,
+    initiallySelected: new Set(["a1", "a2"]),
+    input,
+    output,
+    pause,
+    resume,
+    prepareInput: () => {},
+    exitFn: () => { throw new Error("exit should not be called"); },
+  });
+
+  input.emit("keypress", "n", { name: "n" });
+  input.emit("keypress", "\r", { name: "return" });
+  // After the refusal, user toggles one back on and confirms.
+  input.emit("keypress", " ", { name: "space" });
+  input.emit("keypress", "\r", { name: "return" });
+
+  const resolved = await pending;
+  assert.deepEqual([...resolved], ["a1"]);
+  assert.match(output.chunks.join(""), /Select at least one agent/);
+});
+
+test("selectManyWithRawMode with allowEmpty confirms empty selection", async () => {
+  const { input, output, pause, resume } = makeRawModeHarness();
+  const items = makeAgentItems(["a1", "a2"]);
+
+  const pending = selectManyWithRawMode({
+    question: "Pick some",
+    items,
+    initiallySelected: new Set(),
+    allowEmpty: true,
+    input,
+    output,
+    pause,
+    resume,
+    prepareInput: () => {},
+    exitFn: () => { throw new Error("exit should not be called"); },
+  });
+
+  input.emit("keypress", "\r", { name: "return" });
+
+  const resolved = await pending;
+  assert.equal(resolved.size, 0);
+});
+
+test("selectManyWithRawMode handles Ctrl+C with clean teardown", async () => {
+  const { input, output, pause, resume } = makeRawModeHarness();
+  const items = makeAgentItems(["a1", "a2"]);
+  let exitCode = null;
+
+  const pending = selectManyWithRawMode({
+    question: "Pick",
+    items,
+    initiallySelected: new Set(),
+    input,
+    output,
+    pause,
+    resume,
+    prepareInput: () => {},
+    exitFn: (code) => { exitCode = code; },
+  });
+
+  input.emit("keypress", "", { ctrl: true, name: "c" });
+
+  await assert.rejects(pending, /aborted by SIGINT/);
+  assert.equal(exitCode, 1);
+  assert.deepEqual(input.rawModeCalls, [true, false]);
+  assert.equal(input.listenerCount("keypress"), 0);
+});
+
+test("selectManyWithRawMode returns empty set for empty item list without touching raw mode", async () => {
+  const { input, output, pause, resume } = makeRawModeHarness();
+
+  const resolved = await selectManyWithRawMode({
+    question: "Pick",
+    items: [],
+    initiallySelected: new Set(),
+    input,
+    output,
+    pause,
+    resume,
+    prepareInput: () => { throw new Error("prepareInput should not run"); },
+    exitFn: () => { throw new Error("exit should not run"); },
+  });
+
+  assert.equal(resolved.size, 0);
+  assert.deepEqual(input.rawModeCalls, []);
+});
+
+test("pickAgentsInteractively uses prompt.selectAgents when provided and filters to canonical IDs", async () => {
+  const recorded = [];
+  const prompt = {
+    selectAgents(preSelected) {
+      recorded.push([...preSelected].sort());
+      return Promise.resolve(new Set(["claude-code", "github-copilot", "not-a-real-agent"]));
+    },
+  };
+
+  const result = await pickAgentsInteractively(prompt, new Set(["claude-code"]));
+  assert.deepEqual([...result].sort(), ["claude-code", "github-copilot"]);
+  assert.deepEqual(recorded, [["claude-code"]]);
+});
+
+test("pickAgentsInteractively falls back to per-agent confirm() prompts when selectAgents is missing", async () => {
+  const asked = [];
+  // Default-yes for claude-code only; user keeps the default on every prompt.
+  const prompt = {
+    confirm(question, defaultYes) {
+      asked.push({ question, defaultYes });
+      return Promise.resolve(defaultYes);
+    },
+  };
+
+  const result = await pickAgentsInteractively(prompt, new Set(["claude-code"]));
+  assert.deepEqual([...result], ["claude-code"]);
+  assert.equal(asked.length, AGENT_DISPLAY_CATALOG.length);
+  assert.match(asked[0].question, /Include Claude Code \(claude-code\)/);
+});
+
+test("pickAgentsInteractively line-by-line fallback retries when user says no to every agent", async () => {
+  let pass = 0;
+  let calls = 0;
+  // First 12 confirms (pass 0): answer no to everything.
+  // Next 12 confirms (pass 1): accept a single agent mid-way so the retry succeeds.
+  const prompt = {
+    confirm() {
+      calls += 1;
+      if (calls === AGENT_DISPLAY_CATALOG.length) pass = 1;
+      if (pass === 1 && calls === AGENT_DISPLAY_CATALOG.length + 3) {
+        return Promise.resolve(true);
+      }
+      return Promise.resolve(false);
+    },
+  };
+
+  const result = await pickAgentsInteractively(prompt, new Set());
+  assert.equal(result.size, 1);
+  assert.equal(calls, AGENT_DISPLAY_CATALOG.length * 2);
+});
+
+test("pickAgentsInteractively line-by-line fallback throws an actionable error after two empty attempts", async () => {
+  let calls = 0;
+  const prompt = {
+    confirm() {
+      calls += 1;
+      return Promise.resolve(false);
+    },
+  };
+
+  await assert.rejects(
+    pickAgentsInteractively(prompt, new Set()),
+    /No agents selected\. Re-run `init` and pick at least one agent, or use `--agents all`\./,
+  );
+  assert.equal(calls, AGENT_DISPLAY_CATALOG.length * 2);
+});
+
+test("pickAgentsInteractively line-by-line fallback stops retrying when piped stdin is exhausted", async () => {
+  let calls = 0;
+  const prompt = {
+    confirm() {
+      calls += 1;
+      return Promise.resolve(false);
+    },
+    isInputExhausted() {
+      return calls >= AGENT_DISPLAY_CATALOG.length;
+    },
+  };
+
+  await assert.rejects(
+    pickAgentsInteractively(prompt, new Set()),
+    /No agents selected\. Re-run `init` and pick at least one agent, or use `--agents all`\./,
+  );
+  // Exactly one attempt: we don't retry when the buffered stdin is empty.
+  assert.equal(calls, AGENT_DISPLAY_CATALOG.length);
+});
+
 test("reviewSuggestedEntries returns accepted items and detailed bulk stats", async () => {
   const answers = ["y", "r", "e", "custom second", "n"];
   const prompt = {
@@ -6614,6 +6879,9 @@ test("D4: list-agents shows canonical IDs in output", () => {
   expectSuccess(result);
   assert.match(result.stdout, /claude-code/);
   assert.match(result.stdout, /github-copilot/);
+  assert.match(result.stdout, /OpenAI Codex/);
+  assert.match(result.stdout, /openai-codex/);
+  assert.doesNotMatch(result.stdout, /GitHub Agents/);
   assert.match(result.stdout, /cursor/);
   assert.match(result.stdout, /ID/);
 });

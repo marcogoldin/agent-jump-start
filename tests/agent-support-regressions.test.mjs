@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -65,6 +65,90 @@ test("detectCanonicalAgentIds ignores empty tree roots and requires a matching f
 
     writeFileSync(join(tempDir, ".cursor", "rules", "existing-rule.mdc"), "# cursor\n", "utf8");
     assert.equal(detectCanonicalAgentIds(tempDir).has("cursor"), true);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("P0-C.4.1: Claude Code detection follows official project structures", () => {
+  const tempDir = makeTempDir();
+  try {
+    mkdirSync(join(tempDir, ".claude", "skills", "example"), { recursive: true });
+    writeFileSync(join(tempDir, ".claude", "skills", "example", "SKILL.md"), "# skill\n", "utf8");
+    assert.equal(detectCanonicalAgentIds(tempDir).has("claude-code"), true);
+
+    rmSync(join(tempDir, ".claude"), { recursive: true, force: true });
+    mkdirSync(join(tempDir, ".claude"), { recursive: true });
+    writeFileSync(join(tempDir, ".claude", "CLAUDE.md"), "# claude\n", "utf8");
+    assert.equal(detectCanonicalAgentIds(tempDir).has("claude-code"), true);
+
+    rmSync(join(tempDir, ".claude"), { recursive: true, force: true });
+    mkdirSync(join(tempDir, ".claude"), { recursive: true });
+    writeFileSync(join(tempDir, ".claude", "settings.json"), "{}\n", "utf8");
+    assert.equal(detectCanonicalAgentIds(tempDir).has("claude-code"), true);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("P0-C.4.1: Claude Code skill detection tolerates broken SKILL.md symlinks", () => {
+  const tempDir = makeTempDir();
+  try {
+    mkdirSync(join(tempDir, ".claude", "skills", "broken"), { recursive: true });
+    symlinkSync(join(tempDir, "missing-skill.md"), join(tempDir, ".claude", "skills", "broken", "SKILL.md"));
+
+    assert.equal(detectCanonicalAgentIds(tempDir).has("claude-code"), true);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("P0-C.4.1: Codex detection uses AGENTS.md and AGENTS.override.md, excluding .agents", () => {
+  const tempDir = makeTempDir();
+  try {
+    mkdirSync(join(tempDir, ".agents"), { recursive: true });
+    writeFileSync(join(tempDir, ".agents", "AGENTS.md"), "# canonical mirror\n", "utf8");
+    assert.equal(detectCanonicalAgentIds(tempDir).has("openai-codex"), false);
+
+    writeFileSync(join(tempDir, "AGENTS.override.md"), "# codex override\n", "utf8");
+    assert.equal(detectCanonicalAgentIds(tempDir).has("openai-codex"), true);
+
+    rmSync(join(tempDir, "AGENTS.override.md"));
+    mkdirSync(join(tempDir, "services", "api"), { recursive: true });
+    writeFileSync(join(tempDir, "services", "api", "AGENTS.override.md"), "# nested codex\n", "utf8");
+    assert.equal(detectCanonicalAgentIds(tempDir).has("openai-codex"), true);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("P0-C.4.1: Cursor skills directory is first-class detection evidence", () => {
+  const tempDir = makeTempDir();
+  try {
+    mkdirSync(join(tempDir, ".cursor", "skills", "example"), { recursive: true });
+    writeFileSync(join(tempDir, ".cursor", "skills", "example", "SKILL.md"), "# cursor skill\n", "utf8");
+
+    assert.equal(detectCanonicalAgentIds(tempDir).has("cursor"), true);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("P0-C.4.1: openai-codex is canonical while github-agents remains a CLI alias", () => {
+  const tempDir = makeTempDir();
+  try {
+    const initResult = runCli([
+      "init",
+      "--target", tempDir,
+      "--non-interactive",
+      "--agents", "github-agents",
+    ]);
+    expectSuccess(initResult);
+
+    const specPath = join(tempDir, "docs", "agent-jump-start", "canonical-spec.yaml");
+    const spec = JSON.parse(readFileSync(specPath, "utf8"));
+    assert.deepEqual(spec.agentSupport, { mode: "selected", selected: ["openai-codex"] });
+    assert.equal(existsSync(join(tempDir, "AGENTS.md")), true);
   } finally {
     cleanupTempDir(tempDir);
   }

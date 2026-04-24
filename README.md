@@ -243,6 +243,38 @@ agent-jump-start init \
 
 If `--keep-existing` would make one of the selected agents non-convergent, Agent Jump Start removes that agent from the managed selection before writing the spec, so the repository still converges on the first `check`.
 
+### Interactive agent selection (checkbox UX)
+
+During interactive `init`, after the rollout question answers `Choose specific agents`, Agent Jump Start opens a zero-dependency checkbox selector that lists every supported agent by human-readable name, canonical id, and short file-layout hint:
+
+```text
+? Select agents to support
+  > [x] Claude Code           claude-code         CLAUDE.md, .claude/skills/*/SKILL.md
+    [ ] GitHub Copilot        github-copilot      .github/copilot-instructions.md, .github/instructions/*.instructions.md
+    [ ] OpenAI Codex          openai-codex        AGENTS.md
+    [ ] Gemini CLI            gemini-cli          GEMINI.md
+    ...
+  Use ↑/↓, Space to toggle, Enter to confirm (a=all, n=none)
+```
+
+Keyboard controls:
+
+- `↑`/`↓` (or `j`/`k`) move the focus
+- `Space` toggles the focused agent
+- `a` selects all, `n` clears all
+- `Enter` confirms; an empty selection is refused with an actionable hint
+- `Ctrl+C` aborts without writing
+
+Fallbacks and compatibility:
+
+- `--agents all`, `--agents detected`, `--agents <id,...>`, and `--non-interactive` are unchanged
+- when stdin is not a TTY, `init` keeps the existing line-based behavior
+- when raw-mode is unavailable (for example when `NO_COLOR` is set), `init` falls back to one-by-one yes/no prompts that explicitly enumerate all 12 agent names with their file hints
+
+Note on the `claude-code` label: it means Agent Jump Start writes Claude-compatible local files (`CLAUDE.md` and `.claude/skills/`). The Anthropic API does not automatically read those files; teams using the API directly can still reuse that file layout if their own integration loads the content into prompts or tool context.
+
+Note on the `openai-codex` label: it is the official Codex target for repository instructions read from `AGENTS.md`. The older `github-agents` id is still accepted as a deprecated alias for existing specs and scripts.
+
 ## Daily Maintenance
 
 `sync` is the main maintenance command.
@@ -332,8 +364,8 @@ If you only upgrade the global package or switch to `npx @latest`, the repositor
 | Gemini CLI | `GEMINI.md` |
 | Amazon Q Developer | `.amazonq/rules/general.md` |
 | JetBrains Junie | `.junie/AGENTS.md`, `.junie/guidelines.md` |
-| GitHub Agents | `AGENTS.md`, `AGENT.md`, canonical `.agents/skills/*/` |
-| Cursor | `.cursor/rules/agent-instructions.mdc`, `.cursor/rules/*.mdc` |
+| OpenAI Codex | `AGENTS.md` (`AGENT.md` is kept only as legacy Agent Jump Start compatibility output) |
+| Cursor | `.cursor/rules/agent-instructions.mdc`, `.cursor/rules/*.mdc`, canonical `.agents/skills/*/SKILL.md` |
 | Windsurf | `.windsurf/rules/general.md`, `.windsurfrules` |
 | Cline | `.clinerules/general.md`, `.clinerules` when legacy fallback is required |
 | Roo Code | `.roo/rules/agent-instructions.md`, `.roorules` |
@@ -343,13 +375,22 @@ If you only upgrade the global package or switch to `npx @latest`, the repositor
 Notes:
 
 - `.agents/AGENTS.md` is the canonical workspace instruction file
-- `.agents/skills/` is the canonical skill package tree
+- `.agents/skills/` is the canonical skill package tree and is also an official Cursor skill location
 - `.claude/skills/` and `.github/skills/` are mirrors of the canonical packages
+- for GitHub Copilot, `.github/copilot-instructions.md` is the official repository-wide instruction file; `.github/instructions/general.instructions.md` and `.github/skills/` are extended generated projections kept for compatibility
 - agents without native skill-package support receive workspace guidance plus inline skill summaries
 
 ## Skill Packages
 
 Agent Jump Start supports portable skill packages with a `SKILL.md` entrypoint and optional `references/`, `scripts/`, and `assets/` folders.
+
+Plain-language rule:
+
+- normal path: use `add-skill` or `import-skill`, then run `sync`
+- recovery path: use `intake` only when a skill was copied into local agent folders by hand or by another tool
+- migration path: use `absorb` only when existing hand-written agent instruction files need to become canonical workspace instructions
+
+In normal day-to-day use, `sync` is the command that propagates canonically managed skills to the supported agents. `absorb` and `intake` are adoption helpers, not required steps after a successful `add-skill` or `import-skill`.
 
 ### Import one skill
 
@@ -421,7 +462,7 @@ agent-jump-start intake \
 
 Important distinction:
 
-- installed locally means a skill exists on disk under `.agents/skills/`, `.claude/skills/`, or `.github/skills/`
+- installed locally means a skill exists on disk under `.agents/skills/`, `.cursor/skills/`, `.claude/skills/`, or `.github/skills/`
 - managed canonically means the skill is present in the canonical spec and tracked in the lockfile
 - `sync` propagates only canonically managed skills
 - `intake` reports invalid local skills with explicit reasons instead of importing them blindly

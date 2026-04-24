@@ -9,7 +9,20 @@ Historical entries before `v1.13.1` were reconstructed from Git history, existin
 tags, and published release notes. Early development did not tag every release,
 so versions are documented only where the history provides clear evidence.
 
-## [Unreleased]
+## [2.2.0] - 2026-04-24
+
+### Added
+
+- `init` now opens a zero-dependency checkbox selector when the operator picks `Choose specific agents`. All 12 supported agents appear in stable order with checkbox state, human-readable name, canonical id, and a short file-layout hint. Keyboard UX: ↑/↓ or `j`/`k` to move, Space to toggle, `a` to select all, `n` to clear all, Enter to confirm, Ctrl+C to abort without writing. Enter refuses to confirm an empty selection with an actionable hint. This closes roadmap item P0-C.4 — Checkbox Agent Selection During `init`.
+- Official agent structure alignment now detects Claude Code from `.claude/CLAUDE.md`, `.claude/settings.json`, and `.claude/skills/*/SKILL.md`; detects OpenAI Codex from `AGENTS.md` / `AGENTS.override.md` including nested project files while ignoring internal `.agents/`; and detects Cursor from `.cursor/skills/*/SKILL.md`. This closes roadmap item P0-C.4.1.
+
+### Changed
+
+- UX-only change inside the `Choose specific agents` path of `init`: the previous y/e/n/a/s per-item review is replaced by the checklist when raw-mode is available. Every other selection path is unchanged. `--agents all`, `--agents detected`, `--agents <id,...>`, `--non-interactive`, and the canonical `agentSupport` spec shape keep identical semantics and output.
+- When raw-mode is unavailable (e.g. `NO_COLOR` is set) or stdin is not a TTY, `init` falls back to one-by-one yes/no prompts that explicitly enumerate all 12 agent names with their file-layout hint, preserving line-based scripting behavior.
+- Empty selection is no longer silently coerced to "all agents" on any interactive path. The raw-mode checklist refuses Enter with an inline hint; the line-by-line fallback re-asks the full set once and, if still empty (or if piped stdin is exhausted), fails loudly with `No agents selected. Re-run \`init\` and pick at least one agent, or use \`--agents all\`.` This aligns the P0-C.4 UX with its intent that empty confirmation must never succeed.
+- `github-agents` is now a deprecated alias for the canonical `openai-codex` target. New specs written by `init` use `openai-codex`; existing specs, CLI flags, and skill compatibility metadata that still mention `github-agents` continue to validate and sync.
+- GitHub Copilot labels and checklist hints now put the official repository instruction path `.github/copilot-instructions.md` first; additional `.github/instructions/` and `.github/skills/` outputs are documented as extended compatibility projections.
 
 ## [2.1.1] - 2026-04-22
 
