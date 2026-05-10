@@ -9,7 +9,7 @@
   },
   "workspaceInstructions": {
     "packageManagerRule": "Use pnpm for this package. Do not mix with npm or yarn lockfiles.",
-    "runtimeRule": "Node 20.x on the server. Match the Node version used in CI and in deployed environments.",
+    "runtimeRule": "Node 22.x on the server. Match the Node version used in CI and in deployed environments.",
     "sections": [
       {
         "title": "API-specific rules",

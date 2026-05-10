@@ -6873,6 +6873,35 @@ test("D3: disabled-agent roots with unmanaged content are reported, not deleted"
   }
 });
 
+test("D3: sync --purge-disabled fully removes disabled-agent roots with residual content", () => {
+  const tempDir = makeTempDir();
+  try {
+    const specPath = writeSpec(tempDir, makeMinimalSpec());
+    expectSuccess(runCli(["sync", "--spec", specPath, "--target", tempDir]));
+
+    mkdirSync(join(tempDir, ".continue", "skills", "my-skill"), { recursive: true });
+    writeFileSync(join(tempDir, ".continue", "skills", "my-skill", "SKILL.md"), "custom continue skill\n", "utf8");
+    mkdirSync(join(tempDir, ".roo", "skills", "cloud-aws"), { recursive: true });
+    writeFileSync(join(tempDir, ".roo", "skills", "cloud-aws", "SKILL.md"), "custom roo skill\n", "utf8");
+    writeFileSync(join(tempDir, ".roorules"), "custom roo legacy\n", "utf8");
+
+    expectSuccess(runCli(["update-agents", "--spec", specPath, "--remove", "continue-dev,roo-code"]));
+
+    const result = runCli(["sync", "--spec", specPath, "--target", tempDir, "--purge-disabled"]);
+    expectSuccess(result);
+
+    assert.ok(!existsSync(join(tempDir, ".continue")), ".continue/ should be fully removed when purging disabled agents");
+    assert.ok(!existsSync(join(tempDir, ".roo")), ".roo/ should be fully removed when purging disabled agents");
+    assert.ok(!existsSync(join(tempDir, ".roorules")), ".roorules should be removed when purging disabled agents");
+    assert.match(result.stdout, /Purged disabled-agent targets/);
+
+    const checkResult = runCli(["check", "--spec", specPath, "--target", tempDir]);
+    expectSuccess(checkResult);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
 // D4: list-agents without --spec shows canonical IDs
 test("D4: list-agents shows canonical IDs in output", () => {
   const result = runCli(["list-agents"]);
@@ -7010,6 +7039,8 @@ test("P0-D: check after sync --keep-existing exits 2 and reports a Preserved sec
     assert.match(checkResult.stdout, /Preserved \(operator-authored/);
     assert.match(checkResult.stdout, /CLAUDE\.md/);
     assert.match(checkResult.stdout, /safe but non-converged/);
+    assert.match(checkResult.stdout, /promote-preserved/);
+    assert.match(checkResult.stdout, /Discard the preserved hand-edit/);
     // Preserved files must not appear as FAIL drift
     assert.doesNotMatch(checkResult.stdout, /FAIL[^\n]*CLAUDE\.md/);
   } finally {

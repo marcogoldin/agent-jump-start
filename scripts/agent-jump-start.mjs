@@ -42,13 +42,18 @@ Commands:
                  [--agents all|detected|<id,...>]
                  [--force | --backup | --keep-existing]
   bootstrap      --base <path> [--profile <path>] [--output <path>]
-  sync           --spec <path> [--target <path>] [--force | --backup | --keep-existing]
-  absorb         --spec <path> [--target <path>] [--dry-run] [--output <path>]
+  sync           --spec <path> [--target <path>] [--purge-disabled]
+                 [--force | --backup | --keep-existing]
+  absorb         --spec <path> [--target <path>] [--preserved-only]
+                 [--dry-run] [--output <path>]
+                 [--apply --selection <path>]
+  promote-preserved --spec <path> [--target <path>]
+                 [--dry-run] [--output <path>]
                  [--apply --selection <path>]
   infer          --target <path> [--output <path>] [--section <name>] [--format json|text]
   infer-overlay  --target <path> [--output <path>] [--base <path>] [--section <name>]
   doctor         --spec <path> [--suggest --target <path>]
-  render         --spec <path> [--target <path>] [--clean]
+  render         --spec <path> [--target <path>] [--clean] [--purge-disabled]
                  [--force | --backup | --keep-existing]
   check          --spec <path> [--target <path>]
   validate       --spec <path>
@@ -83,6 +88,12 @@ Overwrite protection (init, sync, render):
   --keep-existing    Leave pre-existing files untouched and skip those targets
   (Interactive TTY sessions will prompt per conflict group when none of the flags are set.)
 
+Disabled-agent cleanup:
+  --purge-disabled   Remove all files and directories for agents no longer enabled,
+                     including residual agent-specific content left by previous tools
+                     or manual edits. When combined with --backup, purge targets are
+                     copied to .ajs-backup-* siblings before deletion.
+
 Exit codes (sync, check):
   0  Fully converged — all files match the spec
   1  Failure — write errors, blocked files, or genuine drift
@@ -104,8 +115,17 @@ Examples:
   node scripts/agent-jump-start.mjs sync \\
     --spec canonical-spec.yaml
 
+  node scripts/agent-jump-start.mjs sync \\
+    --spec canonical-spec.yaml --purge-disabled
+
   node scripts/agent-jump-start.mjs absorb \\
     --spec canonical-spec.yaml --target .
+
+  node scripts/agent-jump-start.mjs promote-preserved \
+    --spec canonical-spec.yaml --target .
+
+  node scripts/agent-jump-start.mjs absorb \
+    --spec canonical-spec.yaml --target . --preserved-only
 
   node scripts/agent-jump-start.mjs absorb \\
     --spec canonical-spec.yaml --target . --dry-run --output absorb-proposal.json
@@ -210,6 +230,7 @@ const COMMAND_MAP = {
   "bootstrap":      (opts)        => handleBootstrap(opts),
   "sync":           (opts)        => handleSync(opts),
   "absorb":         (opts)        => handleAbsorb(opts),
+  "promote-preserved": (opts)     => handleAbsorb({ ...opts, "preserved-only": true }),
   "infer":          (opts)        => handleInfer(opts),
   "infer-overlay":  (opts)        => handleInferOverlay(opts),
   "doctor":         (opts)        => handleDoctor(opts),

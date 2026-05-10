@@ -11,6 +11,10 @@ import { buildAbsorbProposal } from "../lib/absorb/proposal.mjs";
 import { resolveLayeredSpecWithMeta } from "../lib/merging.mjs";
 import { validateSpec } from "../lib/validation.mjs";
 
+function readManifest(tempDir) {
+  return JSON.parse(readFileSync(join(tempDir, "docs", "agent-jump-start", "generated-manifest.json"), "utf8"));
+}
+
 const scriptPath = resolve("scripts/agent-jump-start.mjs");
 
 function makeTempDir() {
@@ -260,6 +264,99 @@ test("absorb dry-run is idempotent after sync --force manages all targets", () =
     const result = runCli(["absorb", "--spec", specPath, "--target", tempDir, "--dry-run"]);
     expectSuccess(result);
     assert.match(result.stdout + result.stderr, /Nothing to absorb/);
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("absorb --preserved-only --dry-run targets only preserved files", () => {
+  const tempDir = makeTempDir();
+  try {
+    writeFileSync(join(tempDir, "CLAUDE.md"), "## Validation\n\n```bash\nnpm run lint\n```\n", "utf8");
+    const specPath = writeSpec(tempDir, makeMinimalSpec(), "canonical-spec.yaml");
+
+    const keepResult = runCli(["sync", "--spec", specPath, "--target", tempDir, "--keep-existing"]);
+    assert.equal(keepResult.status, 2, `sync --keep-existing should exit 2.\nSTDOUT:\n${keepResult.stdout}\nSTDERR:\n${keepResult.stderr}`);
+    assert.ok(readManifest(tempDir).preserved.some((entry) => entry.path === "CLAUDE.md"));
+
+    writeFileSync(join(tempDir, "AGENTS.md"), "## TypeScript rules\n- Keep strict mode enabled.\n", "utf8");
+
+    const outputPath = join(tempDir, "preserved-only-proposal.json");
+    const result = runCli([
+      "absorb",
+      "--spec", specPath,
+      "--target", tempDir,
+      "--preserved-only",
+      "--dry-run",
+      "--output", outputPath,
+    ]);
+    expectSuccess(result);
+
+    const proposal = JSON.parse(readFileSync(outputPath, "utf8"));
+    const sourcePaths = proposal.sources.map((entry) => entry.path).sort();
+    assert.deepEqual(sourcePaths, ["CLAUDE.md"]);
+    assert.ok(proposal.proposedPatch.workspaceInstructions.validation.includes("npm run lint"));
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("absorb --preserved-only --apply promotes preserved guidance and converges", () => {
+  const tempDir = makeTempDir();
+  try {
+    writeFileSync(join(tempDir, "CLAUDE.md"), "## Validation\n\n```bash\nnpm run lint\n```\n", "utf8");
+    const specPath = writeSpec(tempDir, makeMinimalSpec(), "canonical-spec.yaml");
+
+    const keepResult = runCli(["sync", "--spec", specPath, "--target", tempDir, "--keep-existing"]);
+    assert.equal(keepResult.status, 2, `sync --keep-existing should exit 2.\nSTDOUT:\n${keepResult.stdout}\nSTDERR:\n${keepResult.stderr}`);
+
+    const selectionPath = join(tempDir, "preserved-selection.json");
+    writeFileSync(selectionPath, `${JSON.stringify({
+      version: 1,
+      decisions: [{ path: "CLAUDE.md", choice: "primary" }],
+    }, null, 2)}\n`, "utf8");
+
+    const absorbResult = runCli([
+      "absorb",
+      "--spec", specPath,
+      "--target", tempDir,
+      "--preserved-only",
+      "--apply",
+      "--selection", selectionPath,
+    ]);
+    expectSuccess(absorbResult);
+    assert.match(readFileSync(specPath, "utf8"), /npm run lint/);
+
+    expectSuccess(runCli(["sync", "--spec", specPath, "--target", tempDir, "--force"]));
+    expectSuccess(runCli(["check", "--spec", specPath, "--target", tempDir]));
+  } finally {
+    cleanupTempDir(tempDir);
+  }
+});
+
+test("promote-preserved alias behaves like absorb --preserved-only", () => {
+  const tempDir = makeTempDir();
+  try {
+    writeFileSync(join(tempDir, "CLAUDE.md"), "## Validation\n\n```bash\nnpm run lint\n```\n", "utf8");
+    const specPath = writeSpec(tempDir, makeMinimalSpec(), "canonical-spec.yaml");
+
+    const keepResult = runCli(["sync", "--spec", specPath, "--target", tempDir, "--keep-existing"]);
+    assert.equal(keepResult.status, 2, `sync --keep-existing should exit 2.\nSTDOUT:\n${keepResult.stdout}\nSTDERR:\n${keepResult.stderr}`);
+
+    const outputPath = join(tempDir, "promote-preserved-proposal.json");
+    const result = runCli([
+      "promote-preserved",
+      "--spec", specPath,
+      "--target", tempDir,
+      "--dry-run",
+      "--output", outputPath,
+    ]);
+    expectSuccess(result);
+
+    const proposal = JSON.parse(readFileSync(outputPath, "utf8"));
+    const sourcePaths = proposal.sources.map((entry) => entry.path).sort();
+    assert.deepEqual(sourcePaths, ["CLAUDE.md"]);
+    assert.ok(proposal.proposedPatch.workspaceInstructions.validation.includes("npm run lint"));
   } finally {
     cleanupTempDir(tempDir);
   }

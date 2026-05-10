@@ -9,6 +9,36 @@ Historical entries before `v1.13.1` were reconstructed from Git history, existin
 tags, and published release notes. Early development did not tag every release,
 so versions are documented only where the history provides clear evidence.
 
+## [3.0.0] - 2026-05-10
+
+### Added
+
+- Added `promote-preserved` as the operator-facing alias for the preserved
+	day-2 recovery workflow. It reuses the existing preserved-only absorb engine,
+	keeps the canonical spec as the source of truth, and makes the intended
+	“promote versus discard” operator choice explicit.
+- Added end-to-end regression coverage for the preserved recovery journey with
+	`scripts/ci/smoke-promote-preserved.mjs` and the npm script
+	`smoke:promote-preserved`.
+- Added `sync --purge-disabled` as the explicit full-cleanup path after
+	deselecting agents. It removes disabled-agent roots such as `.roo/` and
+	`.continue/`, including residual agent-only content that the default safe
+	cleanup intentionally leaves in place.
+- Added end-to-end smoke coverage for the deselection cleanup workflow with
+	`scripts/ci/smoke-purge-disabled.mjs` and the npm script
+	`smoke:purge-disabled`.
+
+### Changed
+
+- Changed preserved drift messaging in `sync` and `check` so the CLI now
+	explains the two supported paths in plain language: promote preserved intent
+	back into the canonical spec with `promote-preserved`, or discard the
+	hand-edit and rewrite from the current spec with `sync --force` or
+	`sync --backup`.
+- Changed repository runtime support to Node.js 22 and newer. The npm engine
+	floor, README requirements, and CI matrix now align on supported 22+ lines;
+	Node.js 18 and 20 are no longer supported in this repository.
+
 ## [2.2.0] - 2026-04-24
 
 ### Added

@@ -1,0 +1,799 @@
+# Agent Jump Start — Roadmap
+
+## Read me first
+
+This file lists only what is still left to build, in strict priority order.
+
+Rules:
+
+1. Start from operator UX outcomes, not implementation convenience.
+2. Apple-style product rule: define the end-user experience first, then work backward to CLI structure, storage, and implementation details.
+3. Prefer the simplest possible user decision that still preserves trust and control.
+4. One command must do one understandable thing.
+5. Fail loudly and usefully with explicit next action.
+
+Shipped details belong to `CHANGELOG.md`, not here.
+
+---
+
+## Current Status (2026-04-24)
+
+This file now lists only remaining roadmap work.
+
+Already shipped or closed-local items have been removed from here and belong in
+`CHANGELOG.md`.
+
+---
+
+## North Star P0 — Vendor-Official Instruction Format Fidelity
+
+**User outcome:** every generated instruction file such as `CLAUDE.md`,
+`.github/copilot-instructions.md`, Cursor rules, Roo rules, Continue rules,
+and the other vendor-specific outputs should be intentionally shaped to match
+the official current documentation of the vendor that consumes it, so teams can
+trust Agent Jump Start as the safest path to first-class compatibility instead
+of a best-effort approximation.
+
+Why this is the highest-priority North Star:
+
+- product trust depends on generated files being not just useful, but
+  contract-compatible with the real vendor surfaces that read them;
+- the current renderer model is strong, but this repository still needs a
+  vendor-by-vendor verification pass against official docs before it can claim
+  format fidelity as a product property;
+- Apple-like product rule: the user should never have to wonder whether a file
+  is "close enough" for Claude, Copilot, Cursor, Roo, Continue, or another
+  supported target;
+- this work changes the standard of quality for the whole product, not just one
+  command or one migration path.
+
+Product principles for this work:
+
+- official vendor documentation is the source of truth for compatibility
+  decisions;
+- compatibility should be explicit, testable, and documented per vendor;
+- generated files must remain simple and stable for operators to review;
+- do not chase undocumented folklore or community conventions when the vendor
+  documentation says otherwise;
+- renderer changes must preserve the canonical spec as the single source of
+  truth rather than introducing vendor-specific authoring forks.
+
+### User-first framing
+
+#### 1. Compatibility must be a product promise, not an assumption
+
+For every supported target, Agent Jump Start should be able to explain:
+
+- which official documentation page defines the expected format or location;
+- which generated file paths and shapes are intentionally aligned to that
+  documentation;
+- which compatibility gaps are still open, if any.
+
+#### 2. Vendor fidelity must be reviewed one target at a time
+
+The work should proceed vendor by vendor rather than as a broad undocumented
+cleanup. Each target needs an explicit pass covering:
+
+- file location and discovery semantics;
+- file naming and extension rules;
+- frontmatter or metadata expectations;
+- markdown structure and constraints;
+- any vendor-specific caveats or unsupported constructs.
+
+#### 3. Done means documented and regression-tested
+
+This initiative is complete only when each supported vendor has:
+
+- a documented compatibility decision rooted in official docs;
+- renderer behavior that matches that decision;
+- regression coverage for the claimed file shape and path semantics;
+- README or spec documentation that teaches the operator the truth plainly.
+
+### Delivery boundaries
+
+This North Star is intentionally separate from the current release tranche.
+
+It should be executed through a dedicated plan that includes:
+
+- official-doc research by vendor;
+- compatibility matrix creation;
+- renderer change proposals with trade-offs;
+- regression strategy per vendor;
+- rollout sequencing so already-working targets are not destabilized casually.
+
+### Done when
+
+- Agent Jump Start can credibly claim vendor-official format fidelity for the
+  supported targets it documents as compatible;
+- compatibility claims in README, help text, and generated files are backed by
+  official vendor documentation;
+- remaining gaps are explicit product backlog items, not implicit assumptions.
+
+---
+
+## Proposed P0-F — Day-2 Promotion of Preserved Operator Intent
+
+**User outcome:** when an operator intentionally keeps a hand-edited generated
+agent file, they can promote the supported parts of that change back into the
+canonical spec and return the repository to a converged state without
+hand-editing YAML or JSON by guesswork.
+
+Why this is P0:
+
+- a real user question now exposes the product gap: “how is agent work tied
+  back to the original spec once implementation starts?”;
+- today the product is honest but incomplete for day-2 use:
+  `sync --keep-existing` preserves operator-authored files safely, but the
+  recovery path is still too manual for many teams;
+- this is not a niche edge case: existing repositories, experiments,
+  emergency edits, and new team members will keep producing intentional drift.
+
+Product principles for this feature:
+
+- the canonical spec remains the single source of truth;
+- generated files are managed projections, not a second writable source of
+  truth;
+- recovery must be explicit, reviewable, and operator-controlled;
+- one command must do one understandable thing;
+- leaf-only writeback must remain unchanged for layered specs;
+- the first iteration must not require Git state or a repo-wide reverse-sync
+  engine.
+
+### User-first Flow
+
+#### 1. Drift must split into two clear operator paths
+
+When `sync --keep-existing` or `check` detects preserved operator-authored
+files, the CLI should explain two plain-language paths:
+
+- discard the hand-edit and converge with `sync --force` or `sync --backup`;
+- keep the intent and promote the supported parts back into the canonical
+  spec.
+
+The operator should not have to infer whether “preserved” means “safe forever”,
+“manual YAML editing required”, or “run absorb and hope”.
+
+#### 2. Promotion should start from preserved files, not from arbitrary repo diff
+
+The first supported day-2 recovery workflow should operate on explicit
+preserved files only.
+
+That means the operator experience becomes:
+
+- run `sync --keep-existing`;
+- review the preserved files reported by the CLI;
+- run a focused promotion command;
+- review the proposed spec patch;
+- write the leaf spec;
+- run `sync`;
+- run `check` and converge.
+
+This keeps the system honest: we promote explicit operator intent, not guessed
+intent from arbitrary history.
+
+#### 3. Scope must stay intentionally narrow in v1
+
+The first release should support only the parts Agent Jump Start already knows
+how to extract safely today:
+
+- `workspaceInstructions.sections`
+- `workspaceInstructions.validation`
+
+Unsupported surfaces must fail clearly with an explicit explanation, for
+example:
+
+- skill mirrors
+- review checklist edits
+- renderer-only formatting changes
+- arbitrary generated prose that does not map cleanly to canonical sections
+
+### CLI Proposal
+
+Prefer evolving the existing recovery bridge before introducing a broad new
+command.
+
+Initial shape:
+
+- keep `absorb --preserved-only` as the lower-level recovery engine
+- expose the operator-facing workflow through:
+  - `agent-jump-start promote-preserved --spec <path> --target <path>`
+
+Behavior:
+
+- read the preserved set already tracked in the generated manifest;
+- discover only those preserved files from known agent targets;
+- reuse the existing extraction and proposal logic for sections and validation;
+- show an interactive review or a deterministic `--dry-run` /
+  `--apply --selection <path>` flow;
+- write only the leaf spec in layered setups;
+- print the exact next `sync` command.
+
+### Engineering Approach
+
+Build in this order:
+
+1. Tighten operator messaging in `sync` and `check` so preserved state clearly
+   explains the discard path versus the promote path.
+2. Reuse `manifest.preserved[]` as the source of explicit operator intent.
+3. Extend the absorb discovery path to support preserved-only targeting and expose it through `promote-preserved`.
+4. Reuse the current extraction, proposal, and review machinery for
+   `workspaceInstructions.sections` and
+   `workspaceInstructions.validation`.
+5. Add layered-spec regression coverage to guarantee leaf-only writeback
+   remains intact.
+6. Update README and CLI help so the day-2 workflow is documented as a
+  supported product path centered on `promote-preserved`.
+7. Defer any broader `reconcile` command until this explicit promotion flow
+   has shipped and real usage justifies a wider scope.
+
+### Done When
+
+- a preserved operator-authored file can be promoted back into the canonical
+  spec without manual spec surgery;
+- the operator can review the proposed patch before any write;
+- `sync` followed by `check` converges after promotion;
+- layered specs still modify the leaf only;
+- unsupported reverse-capture cases fail loudly with the exact reason and next
+  action;
+- the workflow does not require Git history to function.
+
+### Non-goals
+
+- no bidirectional sync promise across all generated files;
+- no repo-wide `git diff` inference in the first iteration;
+- no reverse import of generated skill mirrors or review checklist structure;
+- no hidden automatic spec mutation after a hand-edit;
+- no relaxation of the canonical-spec-is-source-of-truth contract.
+
+---
+
+## Proposed P0-C.5 — Local Skill Diagnostics for `sync` and `intake`
+
+**User outcome:** when a local skill is discovered but not yet canonicalized or mirrored, the CLI explains that state immediately and points to the exact next command instead of forcing the operator to infer what happened.
+
+Why this is P0:
+
+- local skill adoption still becomes confusing when discovery, canonicalization, and mirroring are separated across `intake`, `validate-skill`, and `sync`;
+- the operator should not have to reverse-engineer whether a skill was discovered, imported, skipped, or simply not mirrored.
+
+Build next:
+
+- improve `sync` warnings so they distinguish:
+  - discovered locally
+  - canonicalized into spec or not
+  - mirrored or not
+  - exact next step
+- improve `intake` summaries so structural errors, canonical errors, and local-only state are easier to understand at a glance.
+
+Done when:
+
+- a local skill that is not mirrored has one explicit explanation in CLI output;
+- the next recovery command is obvious from `sync` or `intake` output;
+- operator confusion about “skill exists locally but not under `.claude/skills/`” is removed.
+
+Non-goals:
+
+- no new import semantics beyond clearer diagnostics;
+- no TUI dependency required for this step.
+
+---
+
+## Proposed P0-D — Selective Agent Support
+
+**User outcome:** a team can start Agent Jump Start with only the agents they actually use today, keep the setup simple, and add more agents later without rethinking the whole project.
+
+Why this is P0:
+
+- In real adoption, existing repositories will often want partial rollout, not all supported agents on day one.
+- "Generate everything for everyone" is operationally correct but product-heavy for teams still converging on one or two tools.
+- The first-run experience should reduce commitment anxiety, not force a broad ecosystem choice before trust is earned.
+
+Product principles for this feature:
+
+- Default to the least confusing path for non-expert users.
+- Let "all supported agents" remain one obvious choice, not a removed capability.
+- Existing-repo onboarding should recognize that "start small" is often the safest and most believable path.
+- Adding support later must feel incremental, not like re-initializing the product.
+
+### User-first Flow
+
+#### 1. `init` asks one clear rollout question
+
+The first decision should be:
+
+- support all agents
+- support only agents already detected in this repo
+- choose agents explicitly
+
+Guidance:
+
+- For greenfield repos, `all supported agents` remains the recommended default.
+- For existing repos with detected agent files, `detected agents only` becomes the recommended default.
+- `choose agents explicitly` is the advanced but still first-class path.
+
+#### 2. Explicit selection stays simple
+
+If the operator chooses explicit selection:
+
+- show only canonical agent names, with short user-facing labels;
+- group them in a stable, readable order;
+- avoid dumping internal file paths or projection details into the prompt;
+- confirm the final selected set before writing anything.
+
+The user should leave onboarding with a plain understanding:
+
+- which agents are enabled now;
+- which are not enabled yet;
+- how to add more later.
+
+#### 3. Expanding support later is a separate, focused workflow
+
+Add a dedicated command for later rollout expansion, for example:
+
+- `agent-jump-start update-agents --spec <path>`
+
+Its default interactive behavior should:
+
+- inspect the current project selection;
+- show only agents not yet enabled;
+- let the operator add one, many, or all remaining agents;
+- avoid re-asking about already enabled agents unless explicitly requested.
+
+This must feel like "extend this project" rather than "re-run setup from scratch".
+
+### Proposed Canonical Model
+
+Store the selection in the canonical spec, not a separate sidecar config, so the chosen support surface is:
+
+- versioned with project memory;
+- reviewable in pull requests;
+- deterministic for `render`, `sync`, and `check`;
+- portable across local, CI, and vendored usage.
+
+Proposed shape:
+
+```yaml
+agentSupport:
+  mode: all | selected
+  selected:
+    - claude-code
+    - cursor
+    - openai-codex
+```
+
+Rules:
+
+- Missing `agentSupport` means `all` for backward compatibility.
+- `mode: all` ignores `selected`.
+- `mode: selected` requires a non-empty `selected` list of known canonical agent ids.
+- Canonical ids must reuse one shared source of truth from the agent target registry.
+
+This keeps migration low-risk:
+
+- old specs continue to work unchanged;
+- new specs can opt into narrower propagation without introducing a second config system.
+
+### CLI Proposal
+
+#### `init`
+
+Interactive:
+
+- Ask rollout mode early in guided onboarding, after repo detection but before rendering decisions.
+- If `selected`, walk the user through agent choice and confirmation.
+
+Non-interactive:
+
+- support flags such as:
+  - `--agents all`
+  - `--agents detected`
+  - `--agents claude-code,cursor,openai-codex`
+
+#### `sync`, `render`, `check`
+
+These commands should honor the chosen support surface:
+
+- only selected agents are rendered and checked;
+- stale outputs for now-disabled agents are cleaned as managed stale files;
+- diagnostics name when a target is skipped because it is not enabled for this project.
+
+#### `update-agents`
+
+Primary purpose:
+
+- add agents not yet enabled.
+
+Initial scope:
+
+- default interactive flow only offers missing agents;
+- `--include <csv>` supports scripted additions;
+- `--all-missing` enables every not-yet-selected agent;
+- optional future flag: `--review-all` to revisit the full set.
+
+### Detection and Recommendation Strategy
+
+During onboarding for existing repositories:
+
+- inspect pre-existing agent instruction files already discovered by introspection;
+- map them to canonical agent ids;
+- use that evidence to recommend `detected agents only` when confidence is high.
+
+This keeps the first recommendation grounded in what the repo already signals, instead of assuming universal rollout.
+
+### Engineering Approach
+
+Build in this order:
+
+1. Define canonical spec schema for `agentSupport`.
+2. Reuse one canonical agent id registry across schema, prompts, rendering, and validation.
+3. Gate render/check/manifest generation by enabled agent set.
+4. Add guided onboarding question and non-interactive `--agents` flag support.
+5. Add `update-agents` command for additive rollout.
+6. Add docs and regression coverage for partial-support repos and later expansion.
+
+### Done When
+
+- a non-expert can initialize an existing repo and select only a subset of agents in one pass;
+- a greenfield repo can still choose `all supported agents` in one obvious step;
+- `sync`, `render`, and `check` operate only on enabled agents without hidden drift;
+- later expansion to more agents is additive, explicit, and easier than re-running `init`;
+- backward compatibility is preserved for specs that do not define `agentSupport`.
+
+### Non-goals
+
+- no per-command ad hoc agent filtering that bypasses canonical project memory;
+- no second config file unless the canonical spec proves insufficient;
+- no breaking change where existing projects suddenly stop supporting all agents by default;
+- no rollout UX that requires expert understanding of projection internals.
+
+---
+
+## Proposed P0-E — Complete Agent Selection Lifecycle
+
+**User outcome:** a team can safely narrow, expand, or inspect agent support in an already initialized project without editing the spec manually, guessing internal ids, or getting stuck in `sync/check` drift after choosing to preserve existing files.
+
+Why this is P0:
+
+- Selective support is not complete if it only helps at `init` time.
+- Real projects are more likely to start from an existing repo than from a clean slate.
+- A feature is still product-incomplete when the operator has to discover internal ids inside docs or edit YAML by hand to remove agents.
+- A maintenance workflow is not trustworthy if `sync --keep-existing` appears to succeed but `check` still reports persistent drift with no ergonomic recovery path.
+
+Product principles for this feature:
+
+- The CLI must explain agent choices with operator-facing names and canonical ids together wherever selection happens.
+- Removal must be as first-class as addition.
+- The safe path for existing repos must converge, not leave the user between "kept safely" and "check still failing".
+- The user should not need prior knowledge of spec internals to understand which agent ids exist or how to reference them.
+
+### User-first Flow
+
+#### 1. Existing projects need a real "change my supported agents" workflow
+
+For a repo that is already initialized, the operator should be able to run one focused command and:
+
+- see which agents are enabled now;
+- see which agents are not enabled;
+- add more agents;
+- remove enabled agents;
+- confirm the resulting set before writing changes.
+
+This must feel like "change project support" rather than "edit a config file by hand and hope sync does the right thing".
+
+#### 2. Agent names must be transparent in every relevant CLI flow
+
+Whenever the operator can choose, add, remove, or inspect agents, the CLI should surface:
+
+- the human-readable label, for example `GitHub Copilot`;
+- the canonical id, for example `github-copilot`;
+- the key rendered outputs, in one short line only when useful.
+
+Minimum surfaces:
+
+- `init`
+- `update-agents`
+- `list-agents`
+- validation errors involving unknown ids
+- conflict or skip messages involving disabled agents
+
+The product should never assume the operator already knows that "OpenAI Codex" maps to `openai-codex`, that legacy `github-agents` is only a deprecated alias, or that "Claude Code" maps to `claude-code`.
+
+#### 3. Safe preservation must still lead to a coherent project state
+
+If the operator chooses a safety path such as `--keep-existing`, the next system state must be coherent:
+
+- either the kept files are explicitly treated as intentional preserved overlays and `check` respects that state;
+- or the CLI offers an immediate guided next action, such as absorb, remove, or mark-as-preserved, before declaring the workflow complete.
+
+The bad outcome is:
+
+- `sync` says it kept files safely;
+- `check` still fails on those same files;
+- the operator is left guessing whether the project is healthy.
+
+### CLI Proposal
+
+#### `update-agents` becomes a full lifecycle command
+
+Expand `update-agents` from additive-only behavior to full support lifecycle management.
+
+Target capabilities:
+
+- `--include <csv>` for additive rollout
+- `--remove <csv>` for narrowing support
+- interactive mode showing enabled and missing agents in separate sections
+- `--mode all` to restore full coverage
+- optional `--mode selected --agents <csv>` as a one-shot exact-set operation
+
+Interactive defaults should:
+
+- show enabled agents first;
+- allow deselecting currently enabled agents;
+- show missing agents second;
+- preview stale outputs that will be removed if support is narrowed.
+
+#### `list-agents` becomes the discoverability baseline
+
+`list-agents` should evolve from a plain display list into the authoritative operator reference in the CLI.
+
+It should show, in a compact readable table:
+
+- label
+- canonical id
+- main output targets
+- whether the current project enables it, when `--spec` is provided
+
+This gives manual spec editors and scripted users a single reliable discovery command.
+
+#### Validation and diagnostics must teach the model
+
+When the operator uses an unknown id or asks to remove an already-disabled agent, the CLI should answer with:
+
+- the exact invalid token;
+- the closest supported ids;
+- one next-step command, for example `agent-jump-start list-agents`.
+
+### Operational Issue To Resolve First
+
+#### `sync --keep-existing` must leave a coherent steady state for `check`
+
+This is now a verified real-world gap from `chatopac-runtime` after moving an already initialized repo from full support to:
+
+```yaml
+agentSupport:
+  mode: selected
+  selected:
+    - claude-code
+    - github-copilot
+    - openai-codex
+    - amazon-q
+```
+
+Observed real case:
+
+1. `sync` without safety flags correctly identified a subset of still-enabled files as unmanaged operator-authored mirrors and refused to overwrite them.
+2. The same `sync` run correctly cleaned stale outputs for now-disabled agents such as Cursor, Windsurf, Cline, Roo, Continue, Gemini, Junie, and Aider.
+3. `sync --keep-existing` then behaved safely:
+   - preserved unmanaged files for still-enabled agents;
+   - rendered the rest of the selected support surface;
+   - reported `Sync check passed for 194 file(s)`.
+4. A later standalone `check` still failed on those same kept files and on generated files that were now left in a mixed managed/unmanaged state.
+
+This is not just a technical inconsistency. It is a product failure mode:
+
+- the operator chooses the safe path;
+- the CLI appears to complete successfully;
+- the project still does not converge under the standard maintenance command that should validate steady state.
+
+#### Why this is a P0 blocker
+
+For existing repos, `--keep-existing` is the least risky path and often the most believable one.
+
+If that path does not produce a project state that `check` can later validate, the operator is forced into one of these bad outcomes:
+
+- guess whether the repo is actually healthy;
+- accept permanent red drift after choosing the safe option;
+- manually absorb or hand-edit state without the CLI making that requirement explicit up front.
+
+That breaks the trust model of Agent Jump Start.
+
+#### Root problem
+
+Today the lifecycle semantics are split:
+
+- `sync --keep-existing` treats some collisions as intentionally preserved and continues;
+- `check` still treats those same paths as unmanaged drift against the canonical spec;
+- there is no durable project state recording that the operator intentionally preserved those files during maintenance.
+
+So the product currently has no coherent concept of:
+
+- preserved managed paths;
+- preserved unmanaged overlays;
+- or an explicit "kept by operator choice" state that downstream commands can understand.
+
+#### Required product behavior
+
+After `sync --keep-existing`, one of the following must be true:
+
+1. `check` passes because the kept files are now represented as an intentional preserved state.
+2. `sync` does not report successful completion and instead says clearly:
+   - which files were kept;
+   - that the project is not yet converged;
+   - the one exact next command to make it converge.
+3. the CLI immediately offers a guided follow-up flow, such as:
+   - absorb preserved files into spec;
+   - mark preserved files as accepted overlays;
+   - remove support for the affected agent outputs;
+   - replace kept files later with a confirmed overwrite pass.
+
+What must not happen:
+
+- `sync --keep-existing` appears successful;
+- `check` fails later on the same preserved state;
+- the operator has no explicit mental model for why.
+
+#### Engineering options
+
+Option A: preserved-path state in canonical memory
+
+- Record preserved paths or preserved groups in canonical project state or lockfile state.
+- `check` treats those paths as intentionally preserved, not unexpected drift.
+- `sync` can continue to report deterministic health.
+
+Option B: preserved state is explicitly non-converged
+
+- `sync --keep-existing` must end with a non-success summary if preserved files block steady state.
+- It should print a structured next action:
+  - `absorb`
+  - `update-agents --remove ...`
+  - `sync --force`
+- `check` behavior can then remain strict, because the product never claimed convergence.
+
+Option C: preserve-by-group with immediate lifecycle decision
+
+- When conflicts are grouped by skill/agent root, the CLI can ask once per group:
+  - keep and mark preserved
+  - absorb now
+  - remove this agent support
+  - overwrite
+- This reduces repeated prompts and closes the state model in one workflow.
+
+The final implementation can choose one of these, but it must satisfy the product rule: safe path and validation path cannot disagree silently.
+
+#### Minimum real-case regression to add
+
+Use a fixture shaped like the verified `chatopac-runtime` scenario:
+
+- repo initially rendered for all agents;
+- project spec narrowed to selected subset:
+  - `claude-code`
+  - `github-copilot`
+  - `openai-codex`
+  - `amazon-q`
+- still-enabled roots contain some unmanaged mirrored files under:
+  - `.claude/skills/...`
+  - `.github/skills/...`
+  - `.agents/skills/...`
+- disabled agent outputs exist and should be removed.
+
+Expected assertions:
+
+1. `sync --keep-existing` preserves unmanaged files in enabled roots.
+2. `sync --keep-existing` removes stale outputs for disabled agents.
+3. the resulting state is explicitly one of:
+   - converged and `check` passes;
+   - or non-converged and `sync` reports that clearly with exact next step.
+4. no later standalone `check` should surprise the operator with a failure mode that contradicts the earlier `sync` outcome.
+
+#### Done when
+
+- the safe maintenance path for existing repos is semantically coherent;
+- `sync` and `check` agree on the meaning of preserved files;
+- the CLI teaches the operator what happened and what state the project is in;
+- a narrowed existing repo can be maintained without hidden drift traps after selecting a subset of agents.
+
+### Engineering Approach
+
+Build in this order:
+
+1. Extend agent lifecycle state handling so an exact selected set can be written safely to the canonical spec.
+2. Add removal support and interactive exact-set editing to `update-agents`.
+3. Improve `list-agents` to expose canonical ids and current project state.
+4. Make `sync` + `check` converge correctly after `--keep-existing` when disabled or preserved files remain.
+5. Add targeted docs and regression tests for already-initialized repos changing support over time.
+
+### Done When
+
+- an already initialized repo can narrow support from all agents to a subset with one native CLI workflow;
+- an operator can remove one or more enabled agents without hand-editing the spec;
+- every selection-related CLI surface exposes canonical ids clearly;
+- `sync --keep-existing` does not leave the project in a confusing "safe but permanently failing check" state;
+- manual spec editors have one obvious CLI command to discover valid agent ids.
+
+### Non-goals
+
+- no requirement to re-run `init` just to remove or rename supported agents;
+- no hidden canonical ids that only appear in implementation files or README examples;
+- no maintenance flow that reports success while leaving unresolved drift as the expected steady state.
+
+---
+
+## P2 — Predictable Skills Across Every Agent
+
+**User outcome:** a skill behaves equivalently across supported agents, or the CLI clearly reports the compatibility gap before render/sync.
+
+Build next:
+
+- Define conservative cross-agent activation mapping for `triggers`, `globs`, `alwaysApply`, `manualOnly`, `relatedSkills`.
+- Add compatibility diagnostics that name: agent, incompatible field, reason, safe alternative.
+- Formalize projection behavior for agents with no native skill package support.
+- Publish a single operator reference page mapping each canonical skill field to per-agent behavior.
+
+Done when:
+
+- equivalent behavior is reached for supported projections, or explicit pre-write warnings always surface;
+- incompatibility messages are deterministic and actionable;
+- operator docs are linked from README and tested against current implementation.
+
+Non-goals:
+
+- no silent skill semantic downgrades;
+- no agent-specific hacks in canonical spec schema.
+
+---
+
+## P3 — Team Trust Signals (CI + Release Contract)
+
+**User outcome:** teams can adopt and upgrade safely without custom glue or guesswork.
+
+Build next:
+
+- Ship official CI workflow templates for `validate`, `check`, and drift gates.
+- Add golden snapshot regression suites for `sync`, `doctor`, `update-skills`, and `absorb` handoff paths.
+- Publish release contract: compatibility guarantees, versioning policy for spec/lockfile/output, migration policy.
+- Require migration notes for every schema or lockfile evolution.
+
+Done when:
+
+- a new team can copy one workflow and get trustworthy guardrails;
+- every release states compatibility impact explicitly;
+- migration path is always documented before release.
+
+Non-goals:
+
+- no undocumented breaking changes;
+- no hidden behavior drift between minor releases.
+
+---
+
+## P4 — Useful Beyond Software Engineering
+
+**User outcome:** non-engineering teams can use Agent Jump Start with the same confidence and governance model.
+
+Build next:
+
+- Provide starter profiles for product specs, documentation governance, research synthesis, support/runbooks.
+- Include one complete, testable, real-world example workflow per profile.
+- Extend docs and examples for non-code validation loops.
+
+Done when:
+
+- a non-developer can bootstrap from a profile in under five minutes;
+- generated guidance remains coherent across supported agent targets.
+
+Non-goals:
+
+- no domain-specific profile expansion without repeatable examples and validation tests.
+
+---
+
+## Ordered Execution (from now)
+
+1. Proposed P0-C.5 local-skill diagnostics for `sync` and `intake`.
+2. Proposed P0-D selective agent support.
+3. Proposed P0-E complete agent selection lifecycle.
+4. P2 skill semantics parity and diagnostics.
+5. P3 CI/release trust contract.
+6. P4 non-software expansion.
+
+Cross-cutting requirement: any change in these priorities must preserve shipped trust guardrails (`preserve`, `absorb`, layered leaf-only writeback) and keep `npm test` + smoke suites green.

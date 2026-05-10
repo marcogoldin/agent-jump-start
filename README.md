@@ -5,6 +5,27 @@ A single canonical spec for project instructions, review guidance, and reusable 
 Agent Jump Start renders the right files for twelve coding-agent ecosystems from one source of truth, keeps them synchronized with one maintenance command, and protects pre-existing operator-authored files from accidental overwrite.
 
 It runs on Node.js built-ins only. No runtime dependencies are required.
+Runtime support for this repository now starts at Node.js 22. Older lines such
+as Node.js 18 and 20 are EOL and are no longer supported here.
+
+## Quick Navigation
+
+- [What It Solves](#what-it-solves)
+- [Start Here](#start-here)
+- [First-Run Experience](#first-run-experience)
+- [Selective Agent Support](#selective-agent-support)
+- [Existing Repository Adoption](#existing-repository-adoption)
+- [Daily Maintenance](#daily-maintenance)
+- [Common Commands](#common-commands)
+- [Skill Packages](#skill-packages)
+- [Layered Specs](#layered-specs)
+- [Architecture At A Glance](#architecture-at-a-glance)
+- [CLI Reference](#cli-reference)
+- [Requirements](#requirements)
+- [Installation Options](#installation-options)
+- [Current Limitations](#current-limitations)
+- [Testing](#testing)
+- [Contributing](#contributing)
 
 ## What It Solves
 
@@ -214,11 +235,41 @@ Supported policies on `init`, `sync`, and `render`:
 | `--backup` | create `<file>.ajs-backup-<timestamp>` before overwrite |
 | `--keep-existing` | preserve existing files, skip the rendered version, and exclude it from the manifest |
 
-`sync --keep-existing` has a distinct exit contract in `2.0.0`:
+`sync --keep-existing` has had a distinct exit contract since `2.0.0`:
 
 - exit `0`: fully converged
 - exit `1`: failure or blocked write
 - exit `2`: safe but non-converged because preserved files still need absorb or overwrite
+
+When exit `2` happens, there are two intentional paths:
+
+- discard the hand-edit and rewrite from the current spec with `sync --force`
+  or `sync --backup`
+- keep the intent and promote supported preserved guidance back into the spec
+  with `promote-preserved`
+
+Day-2 preserved recovery flow:
+
+```bash
+agent-jump-start promote-preserved \
+  --spec docs/agent-jump-start/canonical-spec.yaml \
+  --target . \
+  --dry-run
+
+agent-jump-start promote-preserved \
+  --spec docs/agent-jump-start/canonical-spec.yaml \
+  --target . \
+  --apply \
+  --selection path/to/proposal.json
+
+agent-jump-start sync \
+  --spec docs/agent-jump-start/canonical-spec.yaml \
+  --target .
+
+agent-jump-start check \
+  --spec docs/agent-jump-start/canonical-spec.yaml \
+  --target .
+```
 
 ### Recommended adoption flow
 
@@ -293,6 +344,12 @@ What it does:
 
 If preserved operator-authored files remain after `--keep-existing`, `sync` now exits `2` and prints the exact next-step commands needed to converge.
 
+If you intentionally deselect one or more agents and want their footprints gone
+completely, run `sync --purge-disabled`. This is the explicit full-cleanup path
+for disabled agent roots such as `.roo/`, `.continue/`, legacy flat files such
+as `.roorules`, and other residual agent-only content that the default safe
+cleanup intentionally leaves in place.
+
 `check` is the read-only CI equivalent:
 
 ```bash
@@ -335,6 +392,19 @@ agent-jump-start check \
 
 If you only upgrade the global package or switch to `npx @latest`, the repository will still contain the previously generated files until you run this flow.
 
+Full cleanup after deselecting agents:
+
+```bash
+agent-jump-start update-agents \
+  --spec docs/agent-jump-start/canonical-spec.yaml \
+  --remove roo-code,continue-dev
+
+agent-jump-start sync \
+  --spec docs/agent-jump-start/canonical-spec.yaml \
+  --target . \
+  --purge-disabled
+```
+
 ## Common Commands
 
 | If you want to... | Command |
@@ -343,7 +413,9 @@ If you only upgrade the global package or switch to `npx @latest`, the repositor
 | Initialize non-interactively | `agent-jump-start init --non-interactive --target .` |
 | Start from detected agents in an existing repo | `agent-jump-start init --target . --agents detected` |
 | Re-render and converge managed outputs | `agent-jump-start sync --spec docs/agent-jump-start/canonical-spec.yaml --target .` |
+| Fully remove files for disabled agents | `agent-jump-start sync --spec docs/agent-jump-start/canonical-spec.yaml --target . --purge-disabled` |
 | Fail CI on drift | `agent-jump-start check --spec docs/agent-jump-start/canonical-spec.yaml --target .` |
+| Promote supported preserved intent back into the spec | `agent-jump-start promote-preserved --spec docs/agent-jump-start/canonical-spec.yaml --target . --dry-run` |
 | Diagnose a weak or generic spec | `agent-jump-start doctor --spec docs/agent-jump-start/canonical-spec.yaml` |
 | Review repository evidence | `agent-jump-start infer --target .` |
 | Generate a schema-shaped overlay | `agent-jump-start infer-overlay --target . --base canonical-spec.yaml --output overlay.yaml` |
@@ -388,7 +460,8 @@ Plain-language rule:
 
 - normal path: use `add-skill` or `import-skill`, then run `sync`
 - recovery path: use `intake` only when a skill was copied into local agent folders by hand or by another tool
-- migration path: use `absorb` only when existing hand-written agent instruction files need to become canonical workspace instructions
+- migration path: use `absorb` when existing hand-written agent instruction files need to become canonical workspace instructions
+- day-2 promotion path: after `sync --keep-existing`, use `promote-preserved` to promote supported preserved guidance back into the canonical spec
 
 In normal day-to-day use, `sync` is the command that propagates canonically managed skills to the supported agents. `absorb` and `intake` are adoption helpers, not required steps after a successful `add-skill` or `import-skill`.
 
@@ -628,42 +701,73 @@ References:
 
 ## CLI Reference
 
-```bash
-agent-jump-start --help
-agent-jump-start --version
-agent-jump-start list-agents
-agent-jump-start list-agents --spec <path>
-agent-jump-start list-profiles
+### Global commands
 
-agent-jump-start init [--profile <path>] [--target <path>] [--non-interactive] [--agents all|detected|<id,...>]
-agent-jump-start bootstrap --base <path> [--profile <path>] [--output <path>]
-agent-jump-start sync --spec <path> [--target <path>] [--force | --backup | --keep-existing]
-agent-jump-start infer --target <path> [--output <path>] [--section <name>] [--format json|text]
-agent-jump-start infer-overlay --target <path> [--output <path>] [--base <path>] [--section <name>]
-agent-jump-start absorb --spec <path> [--target <path>] [--dry-run] [--output <path>] [--apply --selection <path>]
-agent-jump-start doctor --spec <path> [--suggest --target <path>]
-agent-jump-start render --spec <path> [--target <path>] [--clean] [--force | --backup | --keep-existing]
-agent-jump-start check --spec <path> [--target <path>]
-agent-jump-start validate --spec <path>
+| Command | Purpose |
+|---|---|
+| `agent-jump-start --help` | Show the full command reference |
+| `agent-jump-start --version` | Show the CLI version |
+| `agent-jump-start list-agents` | Show canonical agent ids and display names |
+| `agent-jump-start list-agents --spec <path>` | Show enabled/disabled status for a specific canonical spec |
+| `agent-jump-start list-profiles` | List bundled starter profiles |
 
-agent-jump-start validate-skill <path> [--frontmatter-only]
-agent-jump-start intake --spec <path> [--target <path>] [--import] [--replace]
-agent-jump-start import-skill --spec <path> --skill <path> [--replace]
-agent-jump-start add-skill <source> --spec <path> [--skill <name>] [--replace] [--provider <name>]
-agent-jump-start export-skill --spec <path> --slug <name> --output <path>
-agent-jump-start update-skills --spec <path> [--skill <slug>] [--dry-run]
-agent-jump-start update-agents --spec <path> [--include <id,...>] [--remove <id,...>] [--all-missing] [--mode all]
-agent-jump-start export-schema [--output <path>]
-agent-jump-start demo-clean --target <path>
-agent-jump-start demo-tree --target <path>
-```
+### Bootstrap and maintenance
+
+| Command | Purpose |
+|---|---|
+| `agent-jump-start init [--profile <path>] [--target <path>] [--non-interactive] [--agents all|detected|<id,...>]` | Bootstrap a repository and draft a canonical spec |
+| `agent-jump-start bootstrap --base <path> [--profile <path>] [--output <path>]` | Create a spec from a base/profile pair without running guided init |
+| `agent-jump-start sync --spec <path> [--target <path>] [--purge-disabled] [--force | --backup | --keep-existing]` | Render, clean, and verify the managed output set |
+| `agent-jump-start render --spec <path> [--target <path>] [--clean] [--purge-disabled] [--force | --backup | --keep-existing]` | Render directly without the full sync maintenance path |
+| `agent-jump-start check --spec <path> [--target <path>]` | Validate that generated files still match the canonical spec |
+| `agent-jump-start validate --spec <path>` | Validate canonical spec structure without writing files |
+| `agent-jump-start doctor --spec <path> [--suggest --target <path>]` | Diagnose weak or overly generic specs |
+
+### Adoption, recovery, and lifecycle
+
+| Command | Purpose |
+|---|---|
+| `agent-jump-start absorb --spec <path> [--target <path>] [--preserved-only] [--dry-run] [--output <path>] [--apply --selection <path>]` | Absorb existing agent guidance into canonical memory |
+| `agent-jump-start promote-preserved --spec <path> [--target <path>] [--dry-run] [--output <path>] [--apply --selection <path>]` | Promote supported preserved guidance back into the spec |
+| `agent-jump-start update-agents --spec <path> [--include <id,...>] [--remove <id,...>] [--all-missing] [--mode all]` | Add, remove, or reset supported agents over time |
+| `agent-jump-start sync --spec <path> [--target <path>] --purge-disabled` | Fully remove files for disabled agents, including residual agent-only directories |
+
+### Inference and overlays
+
+| Command | Purpose |
+|---|---|
+| `agent-jump-start infer --target <path> [--output <path>] [--section <name>] [--format json|text]` | Inspect repository evidence and suggest validation or guidance |
+| `agent-jump-start infer-overlay --target <path> [--output <path>] [--base <path>] [--section <name>]` | Generate a schema-shaped overlay from repository evidence |
+
+### Skills and schema
+
+| Command | Purpose |
+|---|---|
+| `agent-jump-start validate-skill <path> [--frontmatter-only]` | Validate a skill package or standalone `SKILL.md` |
+| `agent-jump-start intake --spec <path> [--target <path>] [--import] [--replace]` | Review and optionally import locally discovered skill packages |
+| `agent-jump-start import-skill --spec <path> --skill <path> [--replace]` | Import one explicit local skill package |
+| `agent-jump-start add-skill <source> --spec <path> [--skill <name>] [--replace] [--provider <name>]` | Import a skill from a higher-level source such as GitHub or a registry |
+| `agent-jump-start export-skill --spec <path> --slug <name> --output <path>` | Export a canonical skill into a standalone package |
+| `agent-jump-start update-skills --spec <path> [--skill <slug>] [--dry-run]` | Refresh upstream-tracked imported skills |
+| `agent-jump-start export-schema [--output <path>]` | Export the canonical JSON Schema |
+
+### Demo utilities
+
+| Command | Purpose |
+|---|---|
+| `agent-jump-start demo-clean --target <path>` | Remove a generated demo tree |
+| `agent-jump-start demo-tree --target <path>` | Create a demo tree for inspection |
 
 ## Requirements
 
-- Node.js >= 18
+- Node.js >= 22
 - npm for installation and distribution
 - no runtime dependencies required
 - interactive TTY menus stay zero-dependency and use the native Node.js terminal APIs
+
+Production note:
+
+- use a currently supported Node.js line only; this repository now targets Node.js 22+ because earlier lines used here are already beyond maintenance
 
 ## Installation Options
 
@@ -681,7 +785,10 @@ Use `npm install -g @marcogoldin/agent-jump-start@latest` for upgrades; `agent-j
 ## Current Limitations
 
 - `sync`, `render`, and `check` do not accept transient `--agents` overrides. Agent selection belongs to canonical spec state.
-- `sync --keep-existing` is now explicit about non-convergence: when preserved operator-authored files remain, the command exits `2` and expects a follow-up `absorb`, `sync --force`, or `sync --backup`.
+- `sync --keep-existing` is now explicit about non-convergence: when preserved operator-authored files remain, the command exits `2` and expects a follow-up `promote-preserved`, `sync --force`, or `sync --backup`.
+- `sync --purge-disabled` is the explicit destructive cleanup path for deselected agents. Without it, residual agent-specific unmanaged content is intentionally left in place and reported instead of being deleted silently.
+- `promote-preserved` is the supported day-2 recovery path for preserved files and intentionally stays limited to `workspaceInstructions.sections` and `workspaceInstructions.validation`.
+- `absorb --preserved-only` remains available as the lower-level equivalent of `promote-preserved`.
 - `intake --import --replace` is provenance-safe. Upstream-tracked skills are not downgraded to local-only provenance.
 - `validate-skill --frontmatter-only` is intentionally weaker than the default canonical import check and exists only for legacy CI workflows that still want the old frontmatter-only contract.
 - generated Agent Jump Start skill mirrors are intentionally rejected by `validate-skill`, `import-skill`, `add-skill`, `intake --import`, and `update-skills`; the raw upstream skill remains the only supported source of truth for import and refresh
@@ -705,7 +812,7 @@ If a team wants a different implementation language, it can preserve:
 npm test
 ```
 
-303 tests cover core workflows, sync convergence, overwrite protection, guided onboarding, inference, layered specs, leaf-only writeback, skill import and export, provenance lockfiles, absorb flows, grouped conflict prompts, selective agent support, full agent lifecycle management, generated-skill re-import rejection, and regression cases from real existing-repository adoption.
+The automated suite covers core workflows, sync convergence, overwrite protection, guided onboarding, inference, layered specs, leaf-only writeback, skill import and export, provenance lockfiles, absorb flows, grouped conflict prompts, selective agent support, full agent lifecycle management, disabled-agent purge cleanup, generated-skill re-import rejection, and regression cases from real existing-repository adoption.
 
 ## Contributing
 
