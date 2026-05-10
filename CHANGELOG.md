@@ -9,6 +9,18 @@ Historical entries before `v1.13.1` were reconstructed from Git history, existin
 tags, and published release notes. Early development did not tag every release,
 so versions are documented only where the history provides clear evidence.
 
+## [3.0.1] - 2026-05-10
+
+### Fixed
+
+- Fixed a false-positive `sync` advisory where manifest-managed generated skill
+	packages under known local skill roots such as `.agents/skills/` and
+	`.claude/skills/` were incorrectly reported as `invalid local skill package(s)`.
+	Local skill discovery now skips generated skill artifacts that are already
+	owned by the current repository manifest, so existing managed mirrors are no
+	longer surfaced as intake candidates while true generated re-import attempts
+	remain rejected.
+
 ## [3.0.0] - 2026-05-10
 
 ### Added
